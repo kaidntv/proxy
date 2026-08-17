@@ -64,6 +64,7 @@ http_response_code($httpCode);
 $isM3u8 = (strpos($body, '#EXTM3U') !== false || substr($targetUrl, -5) === '.m3u8' || strpos($contentType, 'mpegurl') !== false);
 
 if ($isM3u8) {
+    // ترويسات حيوية جداً لمنع التخزين المؤقت (Cache) للبث المباشر
     header("Content-Type: application/vnd.apple.mpegurl");
     header("Cache-Control: no-cache, no-store, must-revalidate, max-age=0");
     header("Pragma: no-cache");
@@ -94,7 +95,7 @@ if ($isM3u8) {
                 }, $line);
             }
             $output .= $line . "\n";
-        } else { الفرع
+        } else {
             $segmentUrl = $line;
             if (strpos($segmentUrl, 'http') !== 0) {
                 if (strpos($segmentUrl, '/') === 0) {
