@@ -11,8 +11,11 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
+  // ترويسات دقيقة ومتكاملة لكل قطعة لضمان عدم توقف الـ CDN
   const STREAM_HEADERS = { 
-    "User-Agent": "okhttp/4.12.0"
+    "User-Agent": "okhttp/4.12.0",
+    "Referer": "http://re.ycn-redirect.online/",
+    "Accept": "*/*"
   };
 
   function decryptYacine(encryptedData, headerT) {
@@ -31,7 +34,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء الداعم لملفات الـ .js والـ Streaming الصحيح
+  // 1. بروكسي الأجزاء المحسّن لمنع التوقف المفاجئ
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -39,7 +42,10 @@ export async function onRequest(context) {
     try {
       const segmentRes = await fetch(segUrl, { headers: STREAM_HEADERS });
       
-      // نقل نوع المحتوى الحقيقي (سواء كان js أو غيره) كما يرسله السيرفر تماماً
+      if (!segmentRes.ok) {
+        return new Response("Segment Fetch Failed", { status: segmentRes.status });
+      }
+
       const contentType = segmentRes.headers.get("Content-Type") || "application/javascript";
 
       return new Response(segmentRes.body, {
@@ -215,7 +221,6 @@ export async function onRequest(context) {
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
-      // إعادة كتابة الروابط (سواء كانت .js أو غيرها) لتمر بسلام عبر البروكسي
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
@@ -249,7 +254,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("JS-Stream Proxy is Active!", {
+  return new Response("Stable Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
