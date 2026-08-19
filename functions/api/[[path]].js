@@ -145,7 +145,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. توليد ملف M3U8 بروابط CDN مباشرة تماماً (بدون بروكسي للقطع نهائياً)
+  // 5. توليد ملف M3U8 بروابط CDN مباشرة بدون بروكسي وبدون وسوم الانقطاع
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -180,7 +180,6 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف الـ M3U8 الأساسي مع تتبع الـ Redirect للوصول لدومين الـ CDN الفعلي
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
@@ -192,14 +191,19 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; // رابط الـ CDN النهائي المباشر
+      const finalUrl = streamRes.url; 
 
-      // تحويل جميع الروابط الداخلية والقطع إلى روابط CDN مطلقة ومباشرة للمشغل
-      const rewrittenLines = playlistText.split('\n').map(line => {
+      // تصفية الروابط وإزالة وسوم DISCONTINUITY نهائياً
+      const rewrittenLines = playlistText.split('\n').filter(line => {
+        let trimmed = line.trim();
+        if (trimmed === "#EXT-X-DISCONTINUITY") {
+          return false;
+        }
+        return true;
+      }).map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
-        // تحويل وسوم الـ URI الداخلية (مثل EXT-X-MAP) إلى روابط CDN مباشرة
         if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
           return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
             try {
@@ -211,7 +215,6 @@ export async function onRequest(context) {
           });
         }
 
-        // تحويل روابط القطع النسبية إلى روابط CDN مباشرة بدون أي بروكسي
         if (!trimmed.startsWith('#')) {
           try {
             return new URL(trimmed, finalUrl).href;
@@ -240,7 +243,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Direct CDN Stream Generator is Active!", {
+  return new Response("Direct CDN Stream Generator (No Proxy) is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
