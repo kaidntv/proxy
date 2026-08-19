@@ -32,7 +32,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء الكامل (Proxy Segment)
+  // 1. بروكسي الأجزاء السريع جداً
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -162,7 +162,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 وتوجيه أجزائه إلى البروكسي الداخلي
+  // 6. توليد ملف M3U8 الفائق السرعة (بدون تأخير)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -197,21 +197,17 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      const redirectRes = await fetch(rawUrl, {
+      // جلب الـ M3U8 مباشرة مع تتبع الـ Redirect بطلب واحد فائق السرعة
+      const streamRes = await fetch(rawUrl, { 
         headers: BROWSER_HEADERS,
-        redirect: "manual"
-      }).catch(() => null);
-      
-      let finalUrl = rawUrl;
-      if (redirectRes && [301, 302, 303, 307, 308].includes(redirectRes.status)) {
-        finalUrl = redirectRes.headers.get("location") || rawUrl;
-      }
+        redirect: "follow"
+      });
 
-      const streamRes = await fetch(finalUrl, { headers: BROWSER_HEADERS });
       if (!streamRes.ok) {
         return new Response("Failed to fetch stream playlist", { status: streamRes.status });
       }
 
+      const finalUrl = streamRes.url;
       const playlistText = await streamRes.text();
       const urlObj = new URL(finalUrl);
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
@@ -250,7 +246,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Cloudflare Pages Full Proxy is Active!", {
+  return new Response("Ultra-Fast Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
