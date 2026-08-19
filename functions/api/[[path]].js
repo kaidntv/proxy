@@ -1,6 +1,3 @@
-// ذاكرة مؤقتة لتثبيت جلسة القناة والتوكن وسيرفر الـ CDN لضمان عدم انقطاع البث
-const activeSessions = new Map();
-
 export async function onRequest(context) {
   const { request, env, params } = context;
   const url = new URL(request.url);
@@ -14,6 +11,7 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
 
+  // دالة فك التشفير الأساسية
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
     const binaryString = atob(encryptedData);
@@ -30,7 +28,36 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات
+  // دالة ذكية لاستخراج الرابط الحقيقي بعد فك التشفير
+  function extractUrlFromDecrypted(decryptedText) {
+    if (!decryptedText) return "";
+    let trimmed = decryptedText.trim();
+    
+    // إذا كان رابطاً مباشراً
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed;
+    }
+
+    try {
+      const json = JSON.parse(trimmed);
+      const servers = json.data?.servers || json.servers || json.data || json;
+      if (Array.isArray(servers)) {
+        const s = servers[0];
+        return s?.url || s?.file || s?.link || "";
+      } else if (typeof servers === 'object' && servers !== null) {
+        return servers.url || servers.file || servers.link || "";
+      } else if (typeof servers === 'string' && (servers.startsWith('http://') || servers.startsWith('https://'))) {
+        return servers;
+      }
+    } catch (e) {
+      // إذا لم يكن JSON، ابحث عن أي رابط داخل النص عبر التعبير المنتظم
+      const match = decryptedText.match(/https?:\/\/[^\s"']+/);
+      if (match) return match[0];
+    }
+    return "";
+  }
+
+  // 1. جلب المباريات
   if (subPath === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -62,7 +89,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. جلب قنوات تصنيف معين
+  // 3. جلب القنوات
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const categoryId = subPath.split("/")[1] || "1";
     try {
@@ -91,86 +118,59 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. معالجة البث وجلب قائمة محدثة ومتجددة لحظياً
+  // 4. معالجة البث، فك التشفير المباشر، وتمرير الرابط خلفه بدون أي توقف
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
-    const sessionKey = `${targetId}_${serverIndex}`;
 
     try {
-      let streamTargetUrl = "";
-      const session = activeSessions.get(sessionKey);
-      const now = Date.now();
+      let rawUrl = "";
 
-      // تثبيت رابط الجلسة والتوكن الأساسي لمدة 30 دقيقة
-      if (session && (now - session.time < 1800000)) {
-        streamTargetUrl = session.url;
-      } else {
+      // محاولة الجلب من رابط القناة المباشر وفك تشفيره
+      try {
+        const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
+          headers: YACINE_HEADERS,
+          cf: { cacheTtl: 0, cacheEverything: false }
+        });
+        const chT = chRes.headers.get('T') || chRes.headers.get('t') || "";
+        const decryptedText = decryptYacine(await chRes.text(), chT);
+        rawUrl = extractUrlFromDecrypted(decryptedText);
+      } catch (e) {}
+
+      // محاولة بديلة من الأحداث إذا لزم الأمر
+      if (!rawUrl) {
         try {
           const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
             headers: YACINE_HEADERS,
             cf: { cacheTtl: 0, cacheEverything: false }
           });
           const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
-          const eventData = JSON.parse(decryptYacine(await eventRes.text(), eventT));
-          const rawServers = eventData.data?.servers || eventData.servers || eventData.data || eventData;
-          if (Array.isArray(rawServers)) {
-            const selectedServer = rawServers[serverIndex] || rawServers[0];
-            streamTargetUrl = selectedServer?.url || selectedServer?.file || selectedServer?.link || "";
-          }
+          const decryptedText = decryptYacine(await eventRes.text(), eventT);
+          rawUrl = extractUrlFromDecrypted(decryptedText);
         } catch (e) {}
-
-        if (!streamTargetUrl) {
-          try {
-            const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
-              headers: YACINE_HEADERS,
-              cf: { cacheTtl: 0, cacheEverything: false }
-            });
-            const chT = chRes.headers.get('T') || chRes.headers.get('t') || "";
-            const chData = JSON.parse(decryptYacine(await chRes.text(), chT));
-            const servers = chData.data || chData || [];
-            const selectedServer = (Array.isArray(servers) ? servers : [servers])[serverIndex] || servers[0];
-            streamTargetUrl = selectedServer?.url || selectedServer?.file || "";
-          } catch (e) {}
-        }
-
-        if (streamTargetUrl) {
-          activeSessions.set(sessionKey, { url: streamTargetUrl, time: now });
-        }
       }
 
-      if (!streamTargetUrl) return new Response("Stream URL not found", { status: 404 });
+      if (!rawUrl) return new Response("Stream URL not found after decryption", { status: 404 });
 
-      // إضافة متغير زمني عشوائي لمنع الكاش (Cache-Buster)
-      let finalFetchUrl = streamTargetUrl;
-      const separator = finalFetchUrl.includes('?') ? '&' : '?';
-      finalFetchUrl += `${separator}_nc=${now}`;
-
-      // طلب ملف الـ M3U8 مع الإعدادات المتوافقة تماماً مع Cloudflare
-      const streamRes = await fetch(finalFetchUrl, {
+      // اتباع الرابط والتوجه لسيرفر الـ CDN النهائي
+      const streamRes = await fetch(rawUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
-          "Referer": "http://re.ycn-redirect.com/",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          "Pragma": "no-cache"
+          "Referer": "http://re.ycn-redirect.com/"
         },
         redirect: "follow",
         cf: { cacheTtl: 0, cacheEverything: false }
       });
 
-      if (!streamRes.ok) {
-        activeSessions.delete(sessionKey);
-        return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
-      }
+      if (!streamRes.ok) return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
 
       const playlistText = await streamRes.text();
       const finalUrl = streamRes.url; 
-      
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
-      // إعادة كتابة المسارات النسبية للقطع لتعمل بكفاءة مطلقة
+      // إعادة كتابة مسارات الـ M3U8 والقطع بدقة تامة
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
@@ -214,5 +214,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Fixed Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Decrypt-Direct Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
