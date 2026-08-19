@@ -10,14 +10,6 @@ export async function onRequest(context) {
     "Accept": "application/json", 
     "User-Agent": "okhttp/4.12.0" 
   };
-  
-  const STREAM_HEADERS = { 
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-    "Referer": "http://re.ycn-redirect.com/",
-    "Origin": "http://re.ycn-redirect.com",
-    "Accept": "*/*",
-    "Connection": "Keep-Alive"
-  };
 
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
@@ -35,44 +27,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع مع الهيدرات الصحيحة
-  if (subPath === "proxy_segment") {
-    const segUrl = url.searchParams.get("url");
-    if (!segUrl) return new Response("Missing URL", { status: 400 });
-
-    try {
-      const upstreamHeaders = new Headers(STREAM_HEADERS);
-      const rangeHeader = request.headers.get("Range");
-      if (rangeHeader) upstreamHeaders.set("Range", rangeHeader);
-
-      const segmentRes = await fetch(segUrl, { 
-        headers: upstreamHeaders,
-        redirect: "follow",
-        cf: { cacheTtl: 0, cacheEverything: false }
-      });
-      
-      if (!segmentRes.ok) return new Response("", { status: segmentRes.status });
-
-      const responseHeaders = new Headers();
-      responseHeaders.set("Access-Control-Allow-Origin", "*");
-      responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
-
-      let contentType = segmentRes.headers.get("Content-Type") || "";
-      if (segUrl.includes(".js") || contentType.includes("javascript") || contentType.includes("text")) {
-        contentType = "video/mp4";
-      }
-      responseHeaders.set("Content-Type", contentType || "application/octet-stream");
-
-      return new Response(segmentRes.body, {
-        status: segmentRes.status,
-        headers: responseHeaders
-      });
-    } catch (err) {
-      return new Response("", { status: 500 });
-    }
-  }
-
-  // 2. باقي الـ APIs الأساسية (Categories & Events)
+  // 1. جلب قائمة المباريات
   if (subPath === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -85,6 +40,7 @@ export async function onRequest(context) {
     }
   }
 
+  // 2. جلب التصنيفات
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -97,6 +53,7 @@ export async function onRequest(context) {
     }
   }
 
+  // 3. جلب قنوات تصنيف معين
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const categoryId = subPath.split("/")[1] || "1";
     try {
@@ -122,32 +79,46 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. معالجة وتوليد الـ M3U8 واتباع التوجيه بدقة
+  // 4. توليد ملف M3U8 المباشر (بدون بروكسي للقطع نهائياً)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
+    const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
 
     try {
       let rawUrl = "";
+      
+      // جلب الرابط الأساسي من الـ API
       try {
-        const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
-        const chT = chRes.headers.get('T') || chRes.headers.get('t') || "";
-        const chData = JSON.parse(decryptYacine(await chRes.text(), chT));
-        const servers = chData.data || chData || [];
-        rawUrl = (Array.isArray(servers) ? servers[0] : servers)?.url || "";
+        const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { headers: YACINE_HEADERS });
+        const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
+        const eventData = JSON.parse(decryptYacine(await eventRes.text(), eventT));
+        const rawServers = eventData.data?.servers || eventData.servers || eventData.data || eventData;
+        if (Array.isArray(rawServers)) {
+          const selectedServer = rawServers[serverIndex] || rawServers[0];
+          rawUrl = selectedServer?.url || selectedServer?.file || selectedServer?.link || "";
+        }
       } catch (e) {}
+
+      if (!rawUrl) {
+        try {
+          const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
+          const chT = chRes.headers.get('T') || chRes.headers.get('t') || "";
+          const chData = JSON.parse(decryptYacine(await chRes.text(), chT));
+          const servers = chData.data || chData || [];
+          const selectedServer = (Array.isArray(servers) ? servers : [servers])[serverIndex] || servers[0];
+          rawUrl = selectedServer?.url || selectedServer?.file || "";
+        } catch (e) {}
+      }
 
       if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // تتبع الـ Redirect للحصول على الرابط النهائي بدقة
-      const redirectCheck = await fetch(rawUrl, {
-        headers: STREAM_HEADERS,
-        redirect: "follow"
-      });
-      const finalStreamUrl = redirectCheck.url;
-
-      const streamRes = await fetch(finalStreamUrl, {
-        headers: STREAM_HEADERS,
+      // جلب ملف الـ M3U8 من المصدر باستخدام الهيدرات الصحيحة
+      const streamRes = await fetch(rawUrl, {
+        headers: {
+          "User-Agent": "okhttp/4.12.0",
+          "Referer": "http://re.ycn-redirect.com/"
+        },
         redirect: "follow",
         cf: { cacheTtl: 0, cacheEverything: false }
       });
@@ -155,19 +126,21 @@ export async function onRequest(context) {
       if (!streamRes.ok) return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
 
       const playlistText = await streamRes.text();
-      const baseUrl = finalStreamUrl.substring(0, finalStreamUrl.lastIndexOf("/") + 1);
+      const finalUrl = streamRes.url; 
+      const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
 
+      // تحويل الروابط النسبية إلى روابط مطلقة ومباشرة للسيرفر (دون أي تمرير عبر بروكسي)
       const rewrittenLines = playlistText.split('\n').filter(line => {
         return line.trim() !== "#EXT-X-DISCONTINUITY";
       }).map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
+        // إذا كانت روابط مفاتيح تشفير أو قطع، نجعلها روابط مطلقة مباشرة للـ CDN
         if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
           return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
             try {
-              const absoluteUri = new URL(uriValue, finalStreamUrl).href;
-              return `URI="${origin}/api/proxy_segment?url=${encodeURIComponent(absoluteUri)}"`;
+              return `URI="${new URL(uriValue, finalUrl).href}"`;
             } catch (e) {
               return match;
             }
@@ -176,8 +149,7 @@ export async function onRequest(context) {
 
         if (!trimmed.startsWith('#')) {
           try {
-            const absoluteSegmentUrl = new URL(trimmed, baseUrl).href;
-            return `${origin}/api/proxy_segment?url=${encodeURIComponent(absoluteSegmentUrl)}`;
+            return new URL(trimmed, baseUrl).href;
           } catch (e) {
             return trimmed;
           }
@@ -200,5 +172,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Worker is running perfectly!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Clean Direct M3U8 Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
