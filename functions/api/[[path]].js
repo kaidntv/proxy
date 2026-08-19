@@ -10,6 +10,10 @@ export async function onRequest(context) {
     "Accept": "application/json", 
     "User-Agent": "okhttp/4.12.0" 
   };
+  
+  const STREAM_HEADERS = { 
+    "User-Agent": "okhttp/4.12.0"
+  };
 
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
@@ -27,7 +31,27 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات
+  // 1. بروكسي الأجزاء الثابت (يضمن عدم توقف البث أبداً عبر التمرير السحابي السريع)
+  if (subPath === "proxy_segment") {
+    const segUrl = url.searchParams.get("url");
+    if (!segUrl) return new Response("Missing URL", { status: 400 });
+
+    try {
+      const segmentRes = await fetch(segUrl, { headers: STREAM_HEADERS });
+      return new Response(segmentRes.body, {
+        status: segmentRes.status,
+        headers: {
+          "Content-Type": segmentRes.headers.get("Content-Type") || "video/mp2t",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+      });
+    } catch (err) {
+      return new Response("Segment Proxy Error", { status: 500 });
+    }
+  }
+
+  // 2. جلب قائمة المباريات
   if (subPath === "events") {
     try {
       const eventsRes = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -44,7 +68,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب سيرفرات مباراة محددة
+  // 3. جلب سيرفرات مباراة محددة
   if (subPath.startsWith("event/") || subPath.startsWith("events/")) {
     const eventId = subPath.split("/").pop();
     let streams = [];
@@ -85,7 +109,7 @@ export async function onRequest(context) {
     });
   }
 
-  // 3. جلب التصنيفات
+  // 4. جلب التصنيفات
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -102,7 +126,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. جلب قنوات تصنيف معين
+  // 5. جلب قنوات تصنيف معين
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const parts = subPath.split("/");
     const categoryId = parts[1] || "1";
@@ -137,7 +161,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. جلب البث متخطياً حظر Nginx عبر إضافة User-Agent الصحيح
+  // 6. جلب ملف M3U8 عبر الرابط الرئيسي وتوجيه أجزائه إلى البروكسي الداخلي
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -172,11 +196,9 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف الـ M3U8 مع إرسال User-Agent الخاص بالتطبيق لتجاوز حماية Nginx
+      // جلب ملف الـ M3U8 مع تتبع الـ 302 ومحاكاة ترويصة التطبيق
       const streamRes = await fetch(rawUrl, {
-        headers: {
-          "User-Agent": "okhttp/4.12.0"
-        },
+        headers: STREAM_HEADERS,
         redirect: "follow"
       });
 
@@ -190,17 +212,19 @@ export async function onRequest(context) {
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
-      // إعادة كتابة الروابط لتكون مطلقة وصحيحة تماماً
+      // إعادة كتابة الروابط لتمرير جميع القطع عبر بروكسي الووركر بسلاسة تامة
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
+          let absoluteSegmentUrl = trimmed;
           if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            return trimmed;
+            absoluteSegmentUrl = trimmed;
           } else if (trimmed.startsWith('/')) {
-            return originBase + trimmed;
+            absoluteSegmentUrl = originBase + trimmed;
           } else {
-            return originBase + basePath + trimmed;
+            absoluteSegmentUrl = originBase + basePath + trimmed;
           }
+          return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
         }
         return line;
       });
@@ -222,7 +246,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Bypass Proxy is Active!", {
+  return new Response("Hybrid Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
