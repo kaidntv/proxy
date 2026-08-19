@@ -11,7 +11,6 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
-  // هيدرات صارمة وثابتة تطابق التطبيق الرسمي تماماً لمنع الحظر وتقطيع القطع
   const STREAM_HEADERS = { 
     "User-Agent": "okhttp/4.12.0",
     "Accept": "*/*",
@@ -34,31 +33,43 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع (السر في منع Connection has been shut down والتوقف)
+  // 1. بروكسي القطع مع دعم كامل لطلبات الـ Range لمنع التوقف والتقطيع
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
 
     try {
+      const upstreamHeaders = new Headers(STREAM_HEADERS);
+      const rangeHeader = request.headers.get("Range");
+      if (rangeHeader) {
+        upstreamHeaders.set("Range", rangeHeader);
+      }
+
       const segmentRes = await fetch(segUrl, { 
-        headers: STREAM_HEADERS,
+        headers: upstreamHeaders,
         redirect: "follow",
         cf: { cacheTtl: 0 }
       });
       
-      if (!segmentRes.ok) {
-        return new Response("Segment Fetch Failed", { status: segmentRes.status });
-      }
+      const responseHeaders = new Headers();
+      responseHeaders.set("Access-Control-Allow-Origin", "*");
+      responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
 
-      const contentType = segmentRes.headers.get("Content-Type") || "application/octet-stream";
+      const contentType = segmentRes.headers.get("Content-Type");
+      if (contentType) responseHeaders.set("Content-Type", contentType);
+
+      const contentLength = segmentRes.headers.get("Content-Length");
+      if (contentLength) responseHeaders.set("Content-Length", contentLength);
+
+      const contentRange = segmentRes.headers.get("Content-Range");
+      if (contentRange) responseHeaders.set("Content-Range", contentRange);
+
+      const acceptRanges = segmentRes.headers.get("Accept-Ranges");
+      if (acceptRanges) responseHeaders.set("Accept-Ranges", acceptRanges);
 
       return new Response(segmentRes.body, {
         status: segmentRes.status,
-        headers: {
-          "Content-Type": contentType,
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache, no-store, must-revalidate"
-        }
+        headers: responseHeaders
       });
     } catch (err) {
       return new Response("Segment Proxy Error", { status: 500 });
@@ -175,7 +186,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 وتوجيه كل القطع (سواء js أو pdf أو غيرها) عبر بروكسي الووركر حصرياً
+  // 6. توليد ملف M3U8 ومعالجة مسارات القطع بدقة تامة
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -210,7 +221,7 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف الـ M3U8 الطازج بدون أي كاش لمنع التكرار (Looping)
+      // جلب ملف الـ M3U8 الأساسي مع تتبع الـ Redirect (مثل ما يظهر في الـ Traffic) ومنع الكاش
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
@@ -222,24 +233,18 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; 
-      const urlObj = new URL(finalUrl);
-      const originBase = `${urlObj.protocol}//${urlObj.host}`;
-      const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
+      const finalUrl = streamRes.url; // الرابط النهائي بعد الـ 302 Redirect (مثلاً سيرفر h21)
 
-      // إعادة كتابة مسارات القطع وإجبارها على المرور حصرياً عبر بروكسي الووركر الخاص بك
+      // إعادة كتابة الروابط بدقة باستخدام كلاس URL للتعامل مع أي مسار نسبي أو جذري
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
-          let absoluteSegmentUrl = trimmed;
-          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            absoluteSegmentUrl = trimmed;
-          } else if (trimmed.startsWith('/')) {
-            absoluteSegmentUrl = originBase + trimmed;
-          } else {
-            absoluteSegmentUrl = originBase + basePath + trimmed;
+          try {
+            const absoluteSegmentUrl = new URL(trimmed, finalUrl).href;
+            return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
+          } catch (e) {
+            return trimmed;
           }
-          return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
         }
         return line;
       });
@@ -261,7 +266,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Stable Anti-Disconnect Proxy is Active!", {
+  return new Response("Stable Range-Supported Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
