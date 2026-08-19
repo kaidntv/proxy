@@ -27,10 +27,13 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات (Events API)
+  // 1. جلب قائمة المباريات مع منع التخزين المؤقت
   if (subPath === "events") {
     try {
-      const res = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
+      const res = await fetch("https://def.yacinelive.com/api/events", { 
+        headers: YACINE_HEADERS,
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       return new Response(decryptYacine(await res.text(), t), {
         headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
@@ -40,10 +43,13 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب التصنيفات (Categories API)
+  // 2. جلب التصنيفات مع منع التخزين المؤقت
   if (subPath === "categories") {
     try {
-      const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
+      const res = await fetch("https://def.yacinelive.com/api/categories", { 
+        headers: YACINE_HEADERS,
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       return new Response(decryptYacine(await res.text(), t), {
         headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
@@ -53,11 +59,14 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. جلب قنوات تصنيف معين
+  // 3. جلب قنوات تصنيف معين مع منع التخزين المؤقت
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const categoryId = subPath.split("/")[1] || "1";
     try {
-      const res = await fetch(`https://def.yacinelive.com/api/categories/${categoryId}/channels`, { headers: YACINE_HEADERS });
+      const res = await fetch(`https://def.yacinelive.com/api/categories/${categoryId}/channels`, { 
+        headers: YACINE_HEADERS,
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const data = JSON.parse(decryptYacine(await res.text(), t));
       
@@ -79,7 +88,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. توليد ملف M3U8 النظيف والمستقر (بدون بروكسي للقطع وبدون لصق التوكن بالقطع)
+  // 4. توليد ملف M3U8 مع ضمان جلب رابط حي وجديد كلياً في كل طلب
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -88,9 +97,12 @@ export async function onRequest(context) {
     try {
       let rawUrl = "";
       
-      // محاولة الجلب كـ Event أولاً
+      // جلب بيانات الحدث (Event) مع منع التخزين المؤقت تماماً
       try {
-        const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { headers: YACINE_HEADERS });
+        const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
+          headers: YACINE_HEADERS,
+          cf: { cacheTtl: 0, cacheEverything: false }
+        });
         const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
         const eventData = JSON.parse(decryptYacine(await eventRes.text(), eventT));
         const rawServers = eventData.data?.servers || eventData.servers || eventData.data || eventData;
@@ -100,10 +112,13 @@ export async function onRequest(context) {
         }
       } catch (e) {}
 
-      // إن لم تكن Event، جلبها كقناة عادية (Channel)
+      // جلب بيانات القناة العادية مع منع التخزين المؤقت
       if (!rawUrl) {
         try {
-          const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
+          const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
+            headers: YACINE_HEADERS,
+            cf: { cacheTtl: 0, cacheEverything: false }
+          });
           const chT = chRes.headers.get('T') || chRes.headers.get('t') || "";
           const chData = JSON.parse(decryptYacine(await chRes.text(), chT));
           const servers = chData.data || chData || [];
@@ -114,7 +129,7 @@ export async function onRequest(context) {
 
       if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // جلب ملف الـ M3U8 من المصدر باستخدام الهيدرات المطلوبة
+      // جلب ملف الـ M3U8 الفعلي من الـ CDN مع منع التخزين المؤقت
       const streamRes = await fetch(rawUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
@@ -132,7 +147,7 @@ export async function onRequest(context) {
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
-      // إعادة كتابة الروابط بشكل نظيف ومطابق تماماً للبث الأصلي
+      // إعادة كتابة الروابط بشكل نظيف ومستقر
       const rewrittenLines = playlistText.split('\n').filter(line => {
         return line.trim() !== "#EXT-X-DISCONTINUITY";
       }).map(line => {
@@ -177,5 +192,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Clean Direct M3U8 Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Anti-Cache Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
