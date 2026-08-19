@@ -1,4 +1,5 @@
 const activeSessions = new Map();
+const playlistCache = new Map(); // <--- الميزة المضافة: تخزين مؤقت لملف البث لمدة 3 ثوانٍ لتخفيف الطلبات
 
 export async function onRequest(context) {
   const { request, env, params } = context;
@@ -67,7 +68,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 1.5. جلب تفاصيل مباراة/حدث معين وسيرفراتها (/api/events/{id}) [المسار المضاف حديثاً]
+  // 1.5. جلب تفاصيل مباراة/حدث معين وسيرفراتها (/api/events/{id})
   if (subPath.startsWith("events/") && subPath !== "events") {
     const eventId = subPath.split("/")[1];
     try {
@@ -143,17 +144,30 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. معالجة البث وتثبيت رابط الـ CDN النهائي لمنع قفز السيرفرات والتوقف
+  // 4. معالجة البث وتثبيت رابط الـ CDN النهائي مع التخزين المؤقت الذكي
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
     const sessionKey = `${targetId}_${serverIndex}`;
+    const now = Date.now();
+
+    // فحص الكاش: إذا طلب المستخدمون نفس البث خلال أقل من 3 ثوانٍ، نرسل النتيجة المخزنة مباشرة لتوفير الطلبات
+    const cachedItem = playlistCache.get(sessionKey);
+    if (cachedItem && (now - cachedItem.time < 3000)) {
+      return new Response(cachedItem.text, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+        }
+      });
+    }
 
     try {
       let finalCdnPlaylistUrl = "";
       const session = activeSessions.get(sessionKey);
-      const now = Date.now();
 
       // إذا كانت الجلسة محفوظة ولم يمض عليها 15 دقيقة، نستخدم رابط الـ CDN النهائي الثابت مباشرة
       if (session && (now - session.time < 900000)) {
@@ -208,7 +222,7 @@ export async function onRequest(context) {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           "Referer": "https://x.com/"
         },
-        cf: { cacheTtl: 0, cacheEverything: false }
+        cf: { cacheTttl: 0, cacheEverything: false }
       });
 
       if (!streamRes.ok) {
@@ -249,7 +263,12 @@ export async function onRequest(context) {
         }
       });
 
-      return new Response(rewrittenLines.join('\n'), {
+      const finalResponseText = rewrittenLines.join('\n');
+
+      // حفظ النتيجة في الكاش لتوفير الطلبات المتكررة
+      playlistCache.set(sessionKey, { text: finalResponseText, time: now });
+
+      return new Response(finalResponseText, {
         status: 200,
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
