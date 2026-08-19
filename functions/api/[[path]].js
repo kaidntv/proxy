@@ -10,11 +10,6 @@ export async function onRequest(context) {
     "Accept": "application/json", 
     "User-Agent": "okhttp/4.12.0" 
   };
-  
-  const BROWSER_HEADERS = { 
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-    "Referer": "http://re.ycn-redirect.com/"
-  };
 
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
@@ -32,27 +27,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء السريع جداً
-  if (subPath === "proxy_segment") {
-    const segUrl = url.searchParams.get("url");
-    if (!segUrl) return new Response("Missing URL", { status: 400 });
-
-    try {
-      const segmentRes = await fetch(segUrl, { headers: BROWSER_HEADERS });
-      return new Response(segmentRes.body, {
-        status: segmentRes.status,
-        headers: {
-          "Content-Type": segmentRes.headers.get("Content-Type") || "video/mp2t",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache, no-store, must-revalidate"
-        }
-      });
-    } catch (err) {
-      return new Response("Segment Proxy Error", { status: 500 });
-    }
-  }
-
-  // 2. جلب قائمة المباريات
+  // 1. جلب قائمة المباريات
   if (subPath === "events") {
     try {
       const eventsRes = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -69,7 +44,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. جلب سيرفرات مباراة محددة
+  // 2. جلب سيرفرات مباراة محددة
   if (subPath.startsWith("event/") || subPath.startsWith("events/")) {
     const eventId = subPath.split("/").pop();
     let streams = [];
@@ -110,7 +85,7 @@ export async function onRequest(context) {
     });
   }
 
-  // 4. جلب التصنيفات
+  // 3. جلب التصنيفات
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -127,7 +102,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. جلب قنوات تصنيف معين
+  // 4. جلب قنوات تصنيف معين
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const parts = subPath.split("/");
     const categoryId = parts[1] || "1";
@@ -162,7 +137,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 الفائق السرعة (بدون تأخير)
+  // 5. جلب رابط الـ M3U8 وتحويل أجزائه مباشرة إلى الـ CDN (بدون أي بروكسي معطل للسرعة)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -197,34 +172,38 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب الـ M3U8 مباشرة مع تتبع الـ Redirect بطلب واحد فائق السرعة
-      const streamRes = await fetch(rawUrl, { 
-        headers: BROWSER_HEADERS,
-        redirect: "follow"
-      });
+      // تتبع الـ 302 للحصول على رابط الـ CDN النهائي الذي يحتوي على التوكن
+      const redirectRes = await fetch(rawUrl, {
+        redirect: "manual"
+      }).catch(() => null);
+      
+      let finalUrl = rawUrl;
+      if (redirectRes && [301, 302, 303, 307, 308].includes(redirectRes.status)) {
+        finalUrl = redirectRes.headers.get("location") || rawUrl;
+      }
 
+      // جلب محتوى الـ M3U8 مباشرة
+      const streamRes = await fetch(finalUrl);
       if (!streamRes.ok) {
         return new Response("Failed to fetch stream playlist", { status: streamRes.status });
       }
 
-      const finalUrl = streamRes.url;
       const playlistText = await streamRes.text();
       const urlObj = new URL(finalUrl);
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
+      // تحويل الروابط الداخلية للأجزاء لتشير مباشرة إلى الـ CDN مع التوكن
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
-          let absoluteSegmentUrl = trimmed;
           if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            absoluteSegmentUrl = trimmed;
+            return trimmed;
           } else if (trimmed.startsWith('/')) {
-            absoluteSegmentUrl = originBase + trimmed;
+            return originBase + trimmed;
           } else {
-            absoluteSegmentUrl = originBase + basePath + trimmed;
+            return originBase + basePath + trimmed;
           }
-          return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
         }
         return line;
       });
@@ -246,7 +225,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Ultra-Fast Proxy is Active!", {
+  return new Response("Direct High-Speed CDN Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
