@@ -1,4 +1,4 @@
-// ذاكرة مؤقتة لتثبيت جلسة القناة والتوكن وسيرفر الـ CDN تماماً مثل التطبيق الرسمي
+// ذاكرة مؤقتة لتثبيت جلسة القناة والتوكن وسيرفر الـ CDN لضمان عدم انقطاع البث
 const activeSessions = new Map();
 
 export async function onRequest(context) {
@@ -91,7 +91,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. معالجة البث ومحاكاة مسار التطبيق تماماً
+  // 4. معالجة البث وجلب قائمة محدثة ومتجددة لحظياً لمنع توقف القطع
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -103,11 +103,10 @@ export async function onRequest(context) {
       const session = activeSessions.get(sessionKey);
       const now = Date.now();
 
-      // تثبيت رابط الجلسة والتوكن لمدة 30 دقيقة لضمان عدم تغير السيرفر أو انقطاع البث
+      // تثبيت رابط الجلسة والتوكن الأساسي لمدة 30 دقيقة لضمان عدم تغير السيرفر
       if (session && (now - session.time < 1800000)) {
         streamTargetUrl = session.url;
       } else {
-        // خطوة 1 و 2: جلب وفك تشفير بيانات القناة من API ياسين
         try {
           const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
             headers: YACINE_HEADERS,
@@ -143,13 +142,21 @@ export async function onRequest(context) {
 
       if (!streamTargetUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // خطوة 3: طلب رابط الـ Redirect واتباعه للوصول لسيرفر الـ CDN النهائي
-      const streamRes = await fetch(streamTargetUrl, {
+      // إضافة متغير زمني عشوائي لمنع الكاش (Cache-Buster) وضمان جلب أحدث قطع مضافة
+      let finalFetchUrl = streamTargetUrl;
+      const separator = finalFetchUrl.includes('?') ? '&' : '?';
+      finalFetchUrl += `${separator}_nc=${now}`;
+
+      // طلب ملف الـ M3U8 من الـ CDN مع ترويسات منع التخزين المؤقت قطعياً
+      const streamRes = await fetch(finalFetchUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
-          "Referer": "http://re.ycn-redirect.com/"
+          "Referer": "http://re.ycn-redirect.com/",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache"
         },
         redirect: "follow",
+        cache: "no-store",
         cf: { cacheTtl: 0, cacheEverything: false }
       });
 
@@ -159,12 +166,12 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; // عنوان الـ CDN النهائي (مثل h28.reelcloudedge.online)
+      const finalUrl = streamRes.url; 
       
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
-      // خطوة 4 و 5: إعادة كتابة المسارات النسبية للقطع لتطابق عمل المشغل الحقيقي
+      // إعادة كتابة المسارات النسبية للقطع لتعمل بكفاءة مطلقة
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
@@ -197,7 +204,9 @@ export async function onRequest(context) {
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          "Pragma": "no-cache",
+          "Expires": "0"
         }
       });
 
@@ -206,5 +215,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Exact-Simulation Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Anti-Cache Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
