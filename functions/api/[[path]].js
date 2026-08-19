@@ -91,7 +91,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. معالجة البث وجلب قائمة محدثة ومتجددة لحظياً لمنع توقف القطع
+  // 4. معالجة البث وجلب قائمة محدثة ومتجددة لحظياً
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -103,7 +103,7 @@ export async function onRequest(context) {
       const session = activeSessions.get(sessionKey);
       const now = Date.now();
 
-      // تثبيت رابط الجلسة والتوكن الأساسي لمدة 30 دقيقة لضمان عدم تغير السيرفر
+      // تثبيت رابط الجلسة والتوكن الأساسي لمدة 30 دقيقة
       if (session && (now - session.time < 1800000)) {
         streamTargetUrl = session.url;
       } else {
@@ -142,12 +142,12 @@ export async function onRequest(context) {
 
       if (!streamTargetUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // إضافة متغير زمني عشوائي لمنع الكاش (Cache-Buster) وضمان جلب أحدث قطع مضافة
+      // إضافة متغير زمني عشوائي لمنع الكاش (Cache-Buster)
       let finalFetchUrl = streamTargetUrl;
       const separator = finalFetchUrl.includes('?') ? '&' : '?';
       finalFetchUrl += `${separator}_nc=${now}`;
 
-      // طلب ملف الـ M3U8 من الـ CDN مع ترويسات منع التخزين المؤقت قطعياً
+      // طلب ملف الـ M3U8 مع الإعدادات المتوافقة تماماً مع Cloudflare
       const streamRes = await fetch(finalFetchUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
@@ -156,7 +156,6 @@ export async function onRequest(context) {
           "Pragma": "no-cache"
         },
         redirect: "follow",
-        cache: "no-store",
         cf: { cacheTtl: 0, cacheEverything: false }
       });
 
@@ -215,5 +214,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Anti-Cache Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Fixed Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
