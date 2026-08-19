@@ -12,11 +12,11 @@ export async function onRequest(context) {
   };
   
   const STREAM_HEADERS = { 
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "User-Agent": "okhttp/4.12.0",
     "Accept": "*/*",
     "Connection": "Keep-Alive",
-    "Referer": "https://x.com/",
-    "Origin": "https://x.com/"
+    "Referer": "https://www.yacinelive.com/",
+    "Origin": "https://www.yacinelive.com"
   };
 
   function decryptYacine(encryptedData, headerT) {
@@ -35,7 +35,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي خفيف جداً للقطع لحقن الهيدرات الإجبارية للسيرفر
+  // 1. بروكسي القطع (Segment Proxy) لحقن الهيدرات الإجبارية للـ CDN
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -43,9 +43,7 @@ export async function onRequest(context) {
     try {
       const upstreamHeaders = new Headers(STREAM_HEADERS);
       const rangeHeader = request.headers.get("Range");
-      if (rangeHeader) {
-        upstreamHeaders.set("Range", rangeHeader);
-      }
+      if (rangeHeader) upstreamHeaders.set("Range", rangeHeader);
 
       const segmentRes = await fetch(segUrl, { 
         headers: upstreamHeaders,
@@ -53,16 +51,14 @@ export async function onRequest(context) {
         cf: { cacheTtl: 0, cacheEverything: false }
       });
       
-      if (!segmentRes.ok) {
-        return new Response("", { status: segmentRes.status });
-      }
+      if (!segmentRes.ok) return new Response("", { status: segmentRes.status });
 
       const responseHeaders = new Headers();
       responseHeaders.set("Access-Control-Allow-Origin", "*");
       responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
 
       let contentType = segmentRes.headers.get("Content-Type") || "";
-      if (segUrl.includes(".js") || segUrl.includes(".pdf") || contentType.includes("javascript") || contentType.includes("text")) {
+      if (segUrl.includes(".js") || contentType.includes("javascript") || contentType.includes("text")) {
         contentType = "video/mp4";
       }
       responseHeaders.set("Content-Type", contentType || "application/octet-stream");
@@ -73,9 +69,6 @@ export async function onRequest(context) {
       const contentRange = segmentRes.headers.get("Content-Range");
       if (contentRange) responseHeaders.set("Content-Range", contentRange);
 
-      const acceptRanges = segmentRes.headers.get("Accept-Ranges");
-      if (acceptRanges) responseHeaders.set("Accept-Ranges", acceptRanges);
-
       return new Response(segmentRes.body, {
         status: segmentRes.status,
         headers: responseHeaders
@@ -85,7 +78,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب قائمة المباريات
+  // 2. جلب قائمة المباريات (Events API)
   if (subPath === "events") {
     try {
       const eventsRes = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -133,9 +126,7 @@ export async function onRequest(context) {
     } catch (e) {}
 
     if (streams.length === 0) {
-      streams = [
-        { quality: "Server 1", url: `${origin}/api/stream/${eventId}.m3u8` }
-      ];
+      streams = [{ quality: "Server 1", url: `${origin}/api/stream/${eventId}.m3u8` }];
     }
 
     return new Response(JSON.stringify({ streams }), {
@@ -143,7 +134,7 @@ export async function onRequest(context) {
     });
   }
 
-  // 4. جلب التصنيفات
+  // 4. جلب التصنيفات (Categories API)
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -195,7 +186,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 مع إزالة وسوم التوقف وتوجيه القطع لبروكسي الهيدرات
+  // 6. جلب وتحديث ملف M3U8 طيرانياً (الحل الجذري لمشكلة الـ 4 دقائق لجميع القنوات)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -204,6 +195,7 @@ export async function onRequest(context) {
     try {
       let rawUrl = "";
 
+      // محاولة الجلب كـ Event
       try {
         const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { headers: YACINE_HEADERS });
         const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
@@ -215,6 +207,7 @@ export async function onRequest(context) {
         }
       } catch (e) {}
 
+      // إن لم تكن Event، جرب كـ Channel عادية
       if (!rawUrl) {
         try {
           const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
@@ -226,9 +219,7 @@ export async function onRequest(context) {
         } catch (e) {}
       }
 
-      if (!rawUrl) {
-        return new Response("Stream URL not found", { status: 404 });
-      }
+      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
       
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
@@ -236,19 +227,14 @@ export async function onRequest(context) {
         cf: { cacheTtl: 0, cacheEverything: false }
       });
 
-      if (!streamRes.ok) {
-        return new Response(`Stream CDN Error: ${streamRes.status}`, { status: streamRes.status });
-      }
+      if (!streamRes.ok) return new Response(`Stream CDN Error`, { status: streamRes.status });
 
       const playlistText = await streamRes.text();
       const finalUrl = streamRes.url; 
 
+      // إعادة كتابة الروابط لتمر عبر بروكسي القطع، وإزالة وسوم التوقف المؤقت
       const rewrittenLines = playlistText.split('\n').filter(line => {
-        let trimmed = line.trim();
-        if (trimmed === "#EXT-X-DISCONTINUITY") {
-          return false;
-        }
-        return true;
+        return line.trim() !== "#EXT-X-DISCONTINUITY";
       }).map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
@@ -294,7 +280,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Header-Injected Stream Proxy is Active!", {
+  return new Response("All Yacine APIs are Active & Running!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
