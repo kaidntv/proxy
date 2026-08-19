@@ -1,5 +1,5 @@
-// ذاكرة مؤقتة لتثبيت جلسة القناة وسيرفر الـ CDN لفترة طويلة لضمان عدم تغيره أثناء البث
-const urlCache = new Map();
+// ذاكرة مؤقتة لتثبيت جلسة القناة والتوكن وسيرفر الـ CDN تماماً مثل التطبيق الرسمي
+const activeSessions = new Map();
 
 export async function onRequest(context) {
   const { request, env, params } = context;
@@ -91,22 +91,23 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. توليد ملف M3U8 مع ثبات تام للجلسة لمنع قفز السيرفرات والتقطيع
+  // 4. معالجة البث ومحاكاة مسار التطبيق تماماً
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
-    const cacheKey = `${targetId}_${serverIndex}`;
+    const sessionKey = `${targetId}_${serverIndex}`;
 
     try {
-      let rawUrl = "";
-      const cachedData = urlCache.get(cacheKey);
+      let streamTargetUrl = "";
+      const session = activeSessions.get(sessionKey);
       const now = Date.now();
 
-      // تثبيت الرابط وسيرفر الـ CDN لمدة 20 دقيقة كاملة لضمان عدم حدوث أي تغيير يوقف البث
-      if (cachedData && (now - cachedData.time < 1200000)) {
-        rawUrl = cachedData.url;
+      // تثبيت رابط الجلسة والتوكن لمدة 30 دقيقة لضمان عدم تغير السيرفر أو انقطاع البث
+      if (session && (now - session.time < 1800000)) {
+        streamTargetUrl = session.url;
       } else {
+        // خطوة 1 و 2: جلب وفك تشفير بيانات القناة من API ياسين
         try {
           const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
             headers: YACINE_HEADERS,
@@ -117,11 +118,11 @@ export async function onRequest(context) {
           const rawServers = eventData.data?.servers || eventData.servers || eventData.data || eventData;
           if (Array.isArray(rawServers)) {
             const selectedServer = rawServers[serverIndex] || rawServers[0];
-            rawUrl = selectedServer?.url || selectedServer?.file || selectedServer?.link || "";
+            streamTargetUrl = selectedServer?.url || selectedServer?.file || selectedServer?.link || "";
           }
         } catch (e) {}
 
-        if (!rawUrl) {
+        if (!streamTargetUrl) {
           try {
             const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
               headers: YACINE_HEADERS,
@@ -131,18 +132,19 @@ export async function onRequest(context) {
             const chData = JSON.parse(decryptYacine(await chRes.text(), chT));
             const servers = chData.data || chData || [];
             const selectedServer = (Array.isArray(servers) ? servers : [servers])[serverIndex] || servers[0];
-            rawUrl = selectedServer?.url || selectedServer?.file || "";
+            streamTargetUrl = selectedServer?.url || selectedServer?.file || "";
           } catch (e) {}
         }
 
-        if (rawUrl) {
-          urlCache.set(cacheKey, { url: rawUrl, time: now });
+        if (streamTargetUrl) {
+          activeSessions.set(sessionKey, { url: streamTargetUrl, time: now });
         }
       }
 
-      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
+      if (!streamTargetUrl) return new Response("Stream URL not found", { status: 404 });
 
-      const streamRes = await fetch(rawUrl, {
+      // خطوة 3: طلب رابط الـ Redirect واتباعه للوصول لسيرفر الـ CDN النهائي
+      const streamRes = await fetch(streamTargetUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
           "Referer": "http://re.ycn-redirect.com/"
@@ -152,17 +154,17 @@ export async function onRequest(context) {
       });
 
       if (!streamRes.ok) {
-        // إذا انتهت صلاحية الرابط تماماً، نحذفه ليجلب رابطاً جديداً في المرة القادمة
-        urlCache.delete(cacheKey);
+        activeSessions.delete(sessionKey);
         return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; 
+      const finalUrl = streamRes.url; // عنوان الـ CDN النهائي (مثل h28.reelcloudedge.online)
       
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
+      // خطوة 4 و 5: إعادة كتابة المسارات النسبية للقطع لتطابق عمل المشغل الحقيقي
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
@@ -204,5 +206,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Rock-Solid Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Exact-Simulation Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
