@@ -35,57 +35,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع السريع مع منع التوقف
-  if (subPath === "proxy_segment") {
-    const segUrl = url.searchParams.get("url");
-    if (!segUrl) return new Response("Missing URL", { status: 400 });
-
-    try {
-      const upstreamHeaders = new Headers(STREAM_HEADERS);
-      const rangeHeader = request.headers.get("Range");
-      if (rangeHeader) {
-        upstreamHeaders.set("Range", rangeHeader);
-      }
-
-      const segmentRes = await fetch(segUrl, { 
-        headers: upstreamHeaders,
-        redirect: "follow",
-        cf: { cacheTtl: 0, cacheEverything: false }
-      });
-      
-      if (!segmentRes.ok) {
-        return new Response("", { status: segmentRes.status });
-      }
-
-      const responseHeaders = new Headers();
-      responseHeaders.set("Access-Control-Allow-Origin", "*");
-      responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
-
-      let contentType = segmentRes.headers.get("Content-Type") || "";
-      if (segUrl.includes(".pdf") || segUrl.includes(".js") || contentType.includes("pdf") || contentType.includes("javascript") || contentType.includes("text")) {
-        contentType = "video/mp4";
-      }
-      responseHeaders.set("Content-Type", contentType || "application/octet-stream");
-
-      const contentLength = segmentRes.headers.get("Content-Length");
-      if (contentLength) responseHeaders.set("Content-Length", contentLength);
-
-      const contentRange = segmentRes.headers.get("Content-Range");
-      if (contentRange) responseHeaders.set("Content-Range", contentRange);
-
-      const acceptRanges = segmentRes.headers.get("Accept-Ranges");
-      if (acceptRanges) responseHeaders.set("Accept-Ranges", acceptRanges);
-
-      return new Response(segmentRes.body, {
-        status: segmentRes.status,
-        headers: responseHeaders
-      });
-    } catch (err) {
-      return new Response("", { status: 500 });
-    }
-  }
-
-  // 2. جلب قائمة المباريات
+  // 1. جلب قائمة المباريات
   if (subPath === "events") {
     try {
       const eventsRes = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -102,7 +52,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. جلب سيرفرات مباراة محددة
+  // 2. جلب سيرفرات مباراة محددة
   if (subPath.startsWith("event/") || subPath.startsWith("events/")) {
     const eventId = subPath.split("/").pop();
     let streams = [];
@@ -143,7 +93,7 @@ export async function onRequest(context) {
     });
   }
 
-  // 4. جلب التصنيفات
+  // 3. جلب التصنيفات
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -160,7 +110,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. جلب قنوات تصنيف معين
+  // 4. جلب قنوات تصنيف معين
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const parts = subPath.split("/");
     const categoryId = parts[1] || "1";
@@ -195,7 +145,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 مع ضمان السرعة الفائقة لعمليات التحديث (Refresh)
+  // 5. توليد ملف M3U8 بروابط CDN مباشرة تماماً (بدون بروكسي للقطع نهائياً)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -230,6 +180,7 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
+      // جلب ملف الـ M3U8 الأساسي مع تتبع الـ Redirect للوصول لدومين الـ CDN الفعلي
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
@@ -241,28 +192,29 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; 
+      const finalUrl = streamRes.url; // رابط الـ CDN النهائي المباشر
 
+      // تحويل جميع الروابط الداخلية والقطع إلى روابط CDN مطلقة ومباشرة للمشغل
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
+        // تحويل وسوم الـ URI الداخلية (مثل EXT-X-MAP) إلى روابط CDN مباشرة
         if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
           return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
             try {
               const absoluteUri = new URL(uriValue, finalUrl).href;
-              const proxiedUri = `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteUri);
-              return `URI="${proxiedUri}"`;
+              return `URI="${absoluteUri}"`;
             } catch (e) {
               return match;
             }
           });
         }
 
+        // تحويل روابط القطع النسبية إلى روابط CDN مباشرة بدون أي بروكسي
         if (!trimmed.startsWith('#')) {
           try {
-            const absoluteSegmentUrl = new URL(trimmed, finalUrl).href;
-            return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
+            return new URL(trimmed, finalUrl).href;
           } catch (e) {
             return trimmed;
           }
@@ -276,7 +228,7 @@ export async function onRequest(context) {
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
         }
       });
 
@@ -288,7 +240,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Ultra-Fast Live Stream Proxy is Active!", {
+  return new Response("Direct CDN Stream Generator is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
