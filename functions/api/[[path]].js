@@ -11,7 +11,6 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
-  // ترويسات ثابتة تطابق التطبيق الرسمي تماماً وتمنع الحظر
   const STREAM_HEADERS = { 
     "User-Agent": "okhttp/4.12.0",
     "Accept": "*/*",
@@ -34,7 +33,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء الداعم لملفات الـ .pdf والـ Streaming بدون توقف
+  // 1. بروكسي الأجزاء الموحد (يتعامل مع أي دومين أو امتداد js/pdf/ts)
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -46,7 +45,6 @@ export async function onRequest(context) {
         return new Response("Segment Fetch Failed", { status: segmentRes.status });
       }
 
-      // الحفاظ على نوع المحتوى أو اعتباره تدفق بيانات سليماً
       const contentType = segmentRes.headers.get("Content-Type") || "application/octet-stream";
 
       return new Response(segmentRes.body, {
@@ -172,7 +170,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 وإجبار كافة القطع (بما فيها .pdf) على المرور عبر البروكسي
+  // 6. توليد ملف M3U8 وتمرير كافة القطع عبر البروكسي منعاً لأي خطأ Connection shut down
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -222,7 +220,7 @@ export async function onRequest(context) {
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
-      // إعادة كتابة كل الروابط لتمريرها عبر بروكسي الووركر إجبارياً
+      // إعادة كتابة الروابط بدقة متناهية لضمان عدم خروج أي قطعة للـ CDN مباشرة
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
@@ -256,7 +254,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("PDF-Stream Proxy is Active!", {
+  return new Response("Anti-Disconnect Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
