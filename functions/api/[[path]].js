@@ -31,17 +31,21 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء الثابت (يضمن عدم توقف البث أبداً عبر التمرير السحابي السريع)
+  // 1. بروكسي الأجزاء الداعم لملفات الـ .js والـ Streaming الصحيح
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
 
     try {
       const segmentRes = await fetch(segUrl, { headers: STREAM_HEADERS });
+      
+      // نقل نوع المحتوى الحقيقي (سواء كان js أو غيره) كما يرسله السيرفر تماماً
+      const contentType = segmentRes.headers.get("Content-Type") || "application/javascript";
+
       return new Response(segmentRes.body, {
         status: segmentRes.status,
         headers: {
-          "Content-Type": segmentRes.headers.get("Content-Type") || "video/mp2t",
+          "Content-Type": contentType,
           "Access-Control-Allow-Origin": "*",
           "Cache-Control": "no-cache, no-store, must-revalidate"
         }
@@ -161,7 +165,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. جلب ملف M3U8 عبر الرابط الرئيسي وتوجيه أجزائه إلى البروكسي الداخلي
+  // 6. توليد ملف M3U8 وتوجيه روابط الـ .js إلى البروكسي
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -196,7 +200,6 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف الـ M3U8 مع تتبع الـ 302 ومحاكاة ترويصة التطبيق
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow"
@@ -212,7 +215,7 @@ export async function onRequest(context) {
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
-      // إعادة كتابة الروابط لتمرير جميع القطع عبر بروكسي الووركر بسلاسة تامة
+      // إعادة كتابة الروابط (سواء كانت .js أو غيرها) لتمر بسلام عبر البروكسي
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
@@ -246,7 +249,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Hybrid Proxy is Active!", {
+  return new Response("JS-Stream Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
