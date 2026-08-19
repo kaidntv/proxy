@@ -1,4 +1,4 @@
-// ذاكرة مؤقتة لتثبيت جلسة القناة وضمان عدم تغير السيرفر فجأة أثناء التحديث
+// ذاكرة مؤقتة لتثبيت جلسة القناة وسيرفر الـ CDN لفترة طويلة لضمان عدم تغيره أثناء البث
 const urlCache = new Map();
 
 export async function onRequest(context) {
@@ -91,7 +91,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. توليد ملف M3U8 مع ثبات الجلسة (Session Caching) لمنع التوقف والتقطيع
+  // 4. توليد ملف M3U8 مع ثبات تام للجلسة لمنع قفز السيرفرات والتقطيع
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -103,11 +103,10 @@ export async function onRequest(context) {
       const cachedData = urlCache.get(cacheKey);
       const now = Date.now();
 
-      // إذا كان هناك رابط مخزن ولم يمض عليه دقيقتان، نستخدمه لضمان استقرار المشغل وعدم تغير السيرفر
-      if (cachedData && (now - cachedData.time < 120000)) {
+      // تثبيت الرابط وسيرفر الـ CDN لمدة 20 دقيقة كاملة لضمان عدم حدوث أي تغيير يوقف البث
+      if (cachedData && (now - cachedData.time < 1200000)) {
         rawUrl = cachedData.url;
       } else {
-        // جلب جديد من API ياسين
         try {
           const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
             headers: YACINE_HEADERS,
@@ -153,7 +152,7 @@ export async function onRequest(context) {
       });
 
       if (!streamRes.ok) {
-        // إذا فشل الرابط المخزن (انتهت صلاحيته فعلياً)، نحذفه لكي يجلب رابطاً جديداً في المحاولة التالية
+        // إذا انتهت صلاحية الرابط تماماً، نحذفه ليجلب رابطاً جديداً في المرة القادمة
         urlCache.delete(cacheKey);
         return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
       }
@@ -205,5 +204,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Session-Locked Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Rock-Solid Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
