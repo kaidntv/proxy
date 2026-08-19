@@ -33,7 +33,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع مع دعم كامل لطلبات الـ Range لمنع التوقف والتقطيع
+  // 1. بروكسي القطع مع تصحيح الـ Content-Type لمنع خربطة الـ js و pdf
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -55,8 +55,12 @@ export async function onRequest(context) {
       responseHeaders.set("Access-Control-Allow-Origin", "*");
       responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
 
-      const contentType = segmentRes.headers.get("Content-Type");
-      if (contentType) responseHeaders.set("Content-Type", contentType);
+      // السر هنا: فرض Content-Type فيديو لمنع المشغل من اعتبار الـ pdf أو js ملفات نصية أو مستندات
+      let contentType = segmentRes.headers.get("Content-Type") || "";
+      if (segUrl.includes(".pdf") || segUrl.includes(".js") || contentType.includes("pdf") || contentType.includes("javascript") || contentType.includes("text")) {
+        contentType = "video/mp2t";
+      }
+      responseHeaders.set("Content-Type", contentType || "application/octet-stream");
 
       const contentLength = segmentRes.headers.get("Content-Length");
       if (contentLength) responseHeaders.set("Content-Length", contentLength);
@@ -186,7 +190,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 ومعالجة مسارات القطع بدقة تامة
+  // 6. توليد ملف M3U8 ومعالجة روابط القطع ووسوم الـ URI الداخلية بدقة تامة
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -221,7 +225,6 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف الـ M3U8 الأساسي مع تتبع الـ Redirect (مثل ما يظهر في الـ Traffic) ومنع الكاش
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
@@ -233,12 +236,28 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; // الرابط النهائي بعد الـ 302 Redirect (مثلاً سيرفر h21)
+      const finalUrl = streamRes.url; 
 
-      // إعادة كتابة الروابط بدقة باستخدام كلاس URL للتعامل مع أي مسار نسبي أو جذري
+      // معالجة الأسطر ووسوم الـ URI (مثل EXT-X-MAP) لضمان مرور كل شيء عبر البروكسي
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
+        if (!trimmed) return line;
+
+        // معالجة وسوم الـ URI داخل الـ Tags (مثل EXT-X-MAP أو EXT-X-KEY)
+        if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
+          return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
+            try {
+              const absoluteUri = new URL(uriValue, finalUrl).href;
+              const proxiedUri = `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteUri);
+              return `URI="${proxiedUri}"`;
+            } catch (e) {
+              return match;
+            }
+          });
+        }
+
+        // معالجة روابط الأقطعة العادية
+        if (!trimmed.startsWith('#')) {
           try {
             const absoluteSegmentUrl = new URL(trimmed, finalUrl).href;
             return `${origin}/api/proxy_segment?url=` + encodeURIComponent(absoluteSegmentUrl);
@@ -246,6 +265,7 @@ export async function onRequest(context) {
             return trimmed;
           }
         }
+
         return line;
       });
 
@@ -266,7 +286,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Stable Range-Supported Proxy is Active!", {
+  return new Response("Mime-Fixed & Stable Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
