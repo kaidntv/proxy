@@ -1,148 +1,4 @@
-export async function onRequest(context) {
-  const { request, env, params } = context;
-  const url = new URL(request.url);
-  const pathSegments = params.path || [];
-  const subPath = pathSegments.join('/');
-  const origin = url.origin;
-
-  const BASE_KEY = "c!xZj+N9&G@Ev@vw";
-  const YACINE_HEADERS = { 
-    "Accept": "application/json", 
-    "User-Agent": "okhttp/4.12.0" 
-  };
-  
-  const STREAM_HEADERS = { 
-    "User-Agent": "okhttp/4.12.0",
-    "Accept": "*/*"
-  };
-
-  function decryptYacine(encryptedData, headerT) {
-    const fullKey = BASE_KEY + headerT;
-    const binaryString = atob(encryptedData);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const fullKeyBytes = new TextEncoder().encode(fullKey);
-    const decrypted = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      decrypted[i] = bytes[i] ^ fullKeyBytes[i % fullKeyBytes.length];
-    }
-    return new TextDecoder().decode(decrypted);
-  }
-
-  // 1. جلب قائمة المباريات
-  if (subPath === "events") {
-    try {
-      const eventsRes = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
-      const eventsT = eventsRes.headers.get('T') || eventsRes.headers.get('t') || "";
-      const eventsText = await eventsRes.text();
-      return new Response(decryptYacine(eventsText, eventsT), {
-        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, data: [] }), { 
-        status: 500, 
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
-      });
-    }
-  }
-
-  // 2. جلب سيرفرات مباراة محددة
-  if (subPath.startsWith("event/") || subPath.startsWith("events/")) {
-    const eventId = subPath.split("/").pop();
-    let streams = [];
-
-    try {
-      const eventRes = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
-      const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
-      const eventText = await eventRes.text();
-      const eventData = JSON.parse(decryptYacine(eventText, eventT));
-
-      let rawServers = [];
-      const possible = eventData.data || eventData;
-      if (Array.isArray(possible)) {
-        rawServers = possible;
-      } else if (possible && typeof possible === 'object') {
-        rawServers = possible.servers || possible.streams || possible.qualities || possible.links || [];
-        if (rawServers.length === 0 && (possible.url || possible.file)) {
-          rawServers = [possible];
-        }
-      }
-
-      if (rawServers.length > 0) {
-        streams = rawServers.map((server, index) => ({
-          quality: server.title || server.quality || server.name || `Server ${index + 1}`,
-          url: `${origin}/api/stream/${eventId}.m3u8?server=${index}`
-        }));
-      }
-    } catch (e) {}
-
-    if (streams.length === 0) {
-      streams = [
-        { quality: "Server 1", url: `${origin}/api/stream/${eventId}.m3u8` }
-      ];
-    }
-
-    return new Response(JSON.stringify({ streams }), {
-      headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-    });
-  }
-
-  // 3. جلب التصنيفات
-  if (subPath === "categories") {
-    try {
-      const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
-      const tValue = res.headers.get('T') || res.headers.get('t') || "";
-      const text = await res.text();
-      return new Response(decryptYacine(text, tValue), {
-        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, data: [] }), { 
-        status: 500, 
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
-      });
-    }
-  }
-
-  // 4. جلب قنوات تصنيف معين
-  if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
-    const parts = subPath.split("/");
-    const categoryId = parts[1] || "1";
-
-    try {
-      const res = await fetch(`https://def.yacinelive.com/api/categories/${categoryId}/channels`, { headers: YACINE_HEADERS });
-      const tValue = res.headers.get('T') || res.headers.get('t') || "";
-      const text = await res.text();
-      const data = JSON.parse(decryptYacine(text, tValue));
-
-      const list = data.data || data;
-      if (Array.isArray(list)) {
-        list.forEach(channel => {
-          const chId = channel.id || channel.channel_id;
-          if (chId) {
-            channel.streams = [
-              { quality: "Server 1", url: `${origin}/api/stream/${chId}.m3u8` }
-            ];
-            channel.stream_url = `${origin}/api/stream/${chId}.m3u8`;
-          }
-        });
-      }
-
-      return new Response(JSON.stringify(data), {
-        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, data: [] }), { 
-        status: 500, 
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
-      });
-    }
-  }
-
-  // 5. توليد ملف M3U8 وتحويل الروابط إلى روابط CDN مباشرة ومطلقة
+  // 5. توليد ملف M3U8 وتحويل الروابط إلى روابط CDN مباشرة ومطلقة بدون كاش
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -177,10 +33,14 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // جلب ملف اللاسلطة (M3U8) مع تتبع الـ 302 Redirect للحصول على عنوان الـ CDN النشط (مثل h22)
+      // جلب ملف الـ M3U8 مع منع التخزين المؤقت (Cache) نهائياً
       const streamRes = await fetch(rawUrl, {
         headers: STREAM_HEADERS,
-        redirect: "follow"
+        redirect: "follow",
+        cf: {
+          cacheTtl: 0,
+          cacheEverything: false
+        }
       });
 
       if (!streamRes.ok) {
@@ -188,7 +48,7 @@ export async function onRequest(context) {
       }
 
       const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url; // العنوان النهائي بعد فك الـ 302 Redirect (يحتوي على الـ CDN والـ Token)
+      const finalUrl = streamRes.url; 
       const urlObj = new URL(finalUrl);
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
@@ -213,7 +73,7 @@ export async function onRequest(context) {
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache, no-store, must-revalidate"
+          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"
         }
       });
 
@@ -224,8 +84,3 @@ export async function onRequest(context) {
       });
     }
   }
-
-  return new Response("Direct CDN Stream Proxy is Active!", {
-    headers: { "Content-Type": "text/plain" }
-  });
-}
