@@ -27,7 +27,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات
+  // 1. جلب قائمة المباريات (Events API)
   if (subPath === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
@@ -40,7 +40,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب التصنيفات
+  // 2. جلب التصنيفات (Categories API)
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { headers: YACINE_HEADERS });
@@ -79,7 +79,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. توليد ملف M3U8 المباشر (بدون بروكسي للقطع نهائياً)
+  // 4. توليد ملف M3U8 النظيف والمستقر (بدون بروكسي للقطع وبدون لصق التوكن بالقطع)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -88,7 +88,7 @@ export async function onRequest(context) {
     try {
       let rawUrl = "";
       
-      // جلب الرابط الأساسي من الـ API
+      // محاولة الجلب كـ Event أولاً
       try {
         const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { headers: YACINE_HEADERS });
         const eventT = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
@@ -100,6 +100,7 @@ export async function onRequest(context) {
         }
       } catch (e) {}
 
+      // إن لم تكن Event، جلبها كقناة عادية (Channel)
       if (!rawUrl) {
         try {
           const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
@@ -113,7 +114,7 @@ export async function onRequest(context) {
 
       if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // جلب ملف الـ M3U8 من المصدر باستخدام الهيدرات الصحيحة
+      // جلب ملف الـ M3U8 من المصدر باستخدام الهيدرات المطلوبة
       const streamRes = await fetch(rawUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
@@ -127,20 +128,21 @@ export async function onRequest(context) {
 
       const playlistText = await streamRes.text();
       const finalUrl = streamRes.url; 
-      const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
+      
+      const parsedFinalUrl = new URL(finalUrl);
+      const cdnOrigin = parsedFinalUrl.origin; 
 
-      // تحويل الروابط النسبية إلى روابط مطلقة ومباشرة للسيرفر (دون أي تمرير عبر بروكسي)
+      // إعادة كتابة الروابط بشكل نظيف ومطابق تماماً للبث الأصلي
       const rewrittenLines = playlistText.split('\n').filter(line => {
         return line.trim() !== "#EXT-X-DISCONTINUITY";
       }).map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
-        // إذا كانت روابط مفاتيح تشفير أو قطع، نجعلها روابط مطلقة مباشرة للـ CDN
         if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
           return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
             try {
-              return `URI="${new URL(uriValue, finalUrl).href}"`;
+              return `URI="${new URL(uriValue, cdnOrigin).href}"`;
             } catch (e) {
               return match;
             }
@@ -149,7 +151,10 @@ export async function onRequest(context) {
 
         if (!trimmed.startsWith('#')) {
           try {
-            return new URL(trimmed, baseUrl).href;
+            if (trimmed.startsWith('/')) {
+              return cdnOrigin + trimmed;
+            }
+            return new URL(trimmed, finalUrl).href.split('?')[0];
           } catch (e) {
             return trimmed;
           }
@@ -172,5 +177,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Clean Direct M3U8 Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Clean Direct M3U8 Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
