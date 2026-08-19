@@ -18,7 +18,7 @@ export async function onRequest(context) {
   };
 
   function decryptYacine(encryptedData, headerT) {
-    const fullKey = BASE_KEY + headerT;
+    The fullKey = BASE_KEY + headerT;
     const binaryString = atob(encryptedData);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
@@ -33,7 +33,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع مع تصحيح الـ Content-Type لمنع خربطة الـ js و pdf
+  // 1. بروكسي القطع مع ضبط الـ Content-Type حصرياً إلى video/mp4 ليتوافق مع fMP4
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -55,10 +55,10 @@ export async function onRequest(context) {
       responseHeaders.set("Access-Control-Allow-Origin", "*");
       responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
 
-      // السر هنا: فرض Content-Type فيديو لمنع المشغل من اعتبار الـ pdf أو js ملفات نصية أو مستندات
+      // التصحيح الجذري: تحويل امتدادات pdf و js إلى video/mp4 لأن البث يعتمد على Fragmented MP4
       let contentType = segmentRes.headers.get("Content-Type") || "";
       if (segUrl.includes(".pdf") || segUrl.includes(".js") || contentType.includes("pdf") || contentType.includes("javascript") || contentType.includes("text")) {
-        contentType = "video/mp2t";
+        contentType = "video/mp4";
       }
       responseHeaders.set("Content-Type", contentType || "application/octet-stream");
 
@@ -190,7 +190,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 ومعالجة روابط القطع ووسوم الـ URI الداخلية بدقة تامة
+  // 6. توليد ملف M3U8 ومعالجة روابط القطع ووسوم الـ EXT-X-MAP
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -238,12 +238,10 @@ export async function onRequest(context) {
       const playlistText = await streamRes.text();
       const finalUrl = streamRes.url; 
 
-      // معالجة الأسطر ووسوم الـ URI (مثل EXT-X-MAP) لضمان مرور كل شيء عبر البروكسي
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
-        // معالجة وسوم الـ URI داخل الـ Tags (مثل EXT-X-MAP أو EXT-X-KEY)
         if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
           return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
             try {
@@ -256,7 +254,6 @@ export async function onRequest(context) {
           });
         }
 
-        // معالجة روابط الأقطعة العادية
         if (!trimmed.startsWith('#')) {
           try {
             const absoluteSegmentUrl = new URL(trimmed, finalUrl).href;
@@ -286,7 +283,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Mime-Fixed & Stable Proxy is Active!", {
+  return new Response("fMP4 Mime-Fixed Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
