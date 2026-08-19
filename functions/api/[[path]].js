@@ -137,7 +137,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. التوجيه المباشر الصاروخي (302 Redirect) لرابط الـ CDN الطازج
+  // 5. جلب البث متخطياً حظر Nginx عبر إضافة User-Agent الصحيح
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -172,12 +172,45 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // توجيه المشغل فوراً (302) إلى الرابط الجديد الذي يحتوي على التوكن
-      return new Response(null, {
-        status: 302,
+      // جلب ملف الـ M3U8 مع إرسال User-Agent الخاص بالتطبيق لتجاوز حماية Nginx
+      const streamRes = await fetch(rawUrl, {
         headers: {
-          "Location": rawUrl,
-          "Access-Control-Allow-Origin": "*"
+          "User-Agent": "okhttp/4.12.0"
+        },
+        redirect: "follow"
+      });
+
+      if (!streamRes.ok) {
+        return new Response(`Stream CDN Error: ${streamRes.status}`, { status: streamRes.status });
+      }
+
+      const playlistText = await streamRes.text();
+      const finalUrl = streamRes.url;
+      const urlObj = new URL(finalUrl);
+      const originBase = `${urlObj.protocol}//${urlObj.host}`;
+      const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
+
+      // إعادة كتابة الروابط لتكون مطلقة وصحيحة تماماً
+      const rewrittenLines = playlistText.split('\n').map(line => {
+        let trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            return trimmed;
+          } else if (trimmed.startsWith('/')) {
+            return originBase + trimmed;
+          } else {
+            return originBase + basePath + trimmed;
+          }
+        }
+        return line;
+      });
+
+      return new Response(rewrittenLines.join('\n'), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache, no-store, must-revalidate"
         }
       });
 
@@ -189,7 +222,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Direct 302 Redirect Proxy is Active!", {
+  return new Response("Bypass Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
