@@ -88,7 +88,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. توليد ملف M3U8 مع ضمان جلب رابط حي وجديد كلياً في كل طلب
+  // 4. توليد ملف M3U8 المستقر والمحدث دائماً
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -97,7 +97,6 @@ export async function onRequest(context) {
     try {
       let rawUrl = "";
       
-      // جلب بيانات الحدث (Event) مع منع التخزين المؤقت تماماً
       try {
         const eventRes = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { 
           headers: YACINE_HEADERS,
@@ -112,7 +111,6 @@ export async function onRequest(context) {
         }
       } catch (e) {}
 
-      // جلب بيانات القناة العادية مع منع التخزين المؤقت
       if (!rawUrl) {
         try {
           const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
@@ -129,7 +127,6 @@ export async function onRequest(context) {
 
       if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // جلب ملف الـ M3U8 الفعلي من الـ CDN مع منع التخزين المؤقت
       const streamRes = await fetch(rawUrl, {
         headers: {
           "User-Agent": "okhttp/4.12.0",
@@ -147,35 +144,32 @@ export async function onRequest(context) {
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
-      // إعادة كتابة الروابط بشكل نظيف ومستقر
-      const rewrittenLines = playlistText.split('\n').filter(line => {
-        return line.trim() !== "#EXT-X-DISCONTINUITY";
-      }).map(line => {
+      // إعادة كتابة الروابط مع الحفاظ على جميع الوسوم بما فيها EXT-X-DISCONTINUITY
+      const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
 
-        if (trimmed.startsWith('#') && trimmed.includes('URI=')) {
-          return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
-            try {
-              return `URI="${new URL(uriValue, cdnOrigin).href}"`;
-            } catch (e) {
-              return match;
-            }
-          });
-        }
-
-        if (!trimmed.startsWith('#')) {
-          try {
-            if (trimmed.startsWith('/')) {
-              return cdnOrigin + trimmed;
-            }
-            return new URL(trimmed, finalUrl).href.split('?')[0];
-          } catch (e) {
-            return trimmed;
+        if (trimmed.startsWith('#')) {
+          if (trimmed.includes('URI=')) {
+            return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
+              try {
+                return `URI="${new URL(uriValue, cdnOrigin).href}"`;
+              } catch (e) {
+                return match;
+              }
+            });
           }
+          return line; // تمرير وسوم التحكم والانقطاع سليمة تماماً
         }
 
-        return line;
+        try {
+          if (trimmed.startsWith('/')) {
+            return cdnOrigin + trimmed;
+          }
+          return new URL(trimmed, finalUrl).href.split('?')[0];
+        } catch (e) {
+          return trimmed;
+        }
       });
 
       return new Response(rewrittenLines.join('\n'), {
@@ -192,5 +186,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Anti-Cache Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine Ultimate Stable Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
