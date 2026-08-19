@@ -137,7 +137,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 5. جلب رابط الـ M3U8 وتحويل أجزائه مباشرة إلى الـ CDN (بدون أي بروكسي معطل للسرعة)
+  // 5. التوجيه المباشر الصاروخي (302 Redirect) لرابط الـ CDN الطازج
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -172,48 +172,12 @@ export async function onRequest(context) {
         return new Response("Stream URL not found", { status: 404 });
       }
       
-      // تتبع الـ 302 للحصول على رابط الـ CDN النهائي الذي يحتوي على التوكن
-      const redirectRes = await fetch(rawUrl, {
-        redirect: "manual"
-      }).catch(() => null);
-      
-      let finalUrl = rawUrl;
-      if (redirectRes && [301, 302, 303, 307, 308].includes(redirectRes.status)) {
-        finalUrl = redirectRes.headers.get("location") || rawUrl;
-      }
-
-      // جلب محتوى الـ M3U8 مباشرة
-      const streamRes = await fetch(finalUrl);
-      if (!streamRes.ok) {
-        return new Response("Failed to fetch stream playlist", { status: streamRes.status });
-      }
-
-      const playlistText = await streamRes.text();
-      const urlObj = new URL(finalUrl);
-      const originBase = `${urlObj.protocol}//${urlObj.host}`;
-      const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
-
-      // تحويل الروابط الداخلية للأجزاء لتشير مباشرة إلى الـ CDN مع التوكن
-      const rewrittenLines = playlistText.split('\n').map(line => {
-        let trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
-          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-            return trimmed;
-          } else if (trimmed.startsWith('/')) {
-            return originBase + trimmed;
-          } else {
-            return originBase + basePath + trimmed;
-          }
-        }
-        return line;
-      });
-
-      return new Response(rewrittenLines.join('\n'), {
-        status: 200,
+      // توجيه المشغل فوراً (302) إلى الرابط الجديد الذي يحتوي على التوكن
+      return new Response(null, {
+        status: 302,
         headers: {
-          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache, no-store, must-revalidate"
+          "Location": rawUrl,
+          "Access-Control-Allow-Origin": "*"
         }
       });
 
@@ -225,7 +189,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Direct High-Speed CDN Proxy is Active!", {
+  return new Response("Direct 302 Redirect Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
