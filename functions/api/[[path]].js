@@ -11,13 +11,12 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
-  // إضافة الهيدرز الأساسية التي تتطلبها سيرفرات الـ CDN لمنع الحظر أو القطع
   const STREAM_HEADERS = { 
-    "User-Agent": "okhttp/4.12.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Connection": "Keep-Alive",
     "Referer": "https://x.com/",
-    "Origin": "https://x.com"
+    "Origin": "https://x.com/"
   };
 
   function decryptYacine(encryptedData, headerT) {
@@ -36,7 +35,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع مع تحسين معالجة الأخطاء ودعم الـ Range والهيدرز الكاملة
+  // 1. بروكسي القطع السريع مع منع التوقف
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -51,10 +50,9 @@ export async function onRequest(context) {
       const segmentRes = await fetch(segUrl, { 
         headers: upstreamHeaders,
         redirect: "follow",
-        cf: { cacheTtl: 0 }
+        cf: { cacheTtl: 0, cacheEverything: false }
       });
       
-      // إذا حدث خطأ في جلب القطعة من الـ CDN، نرجع استجابة فارغة بدلاً من إيقاف المشغل بالكامل
       if (!segmentRes.ok) {
         return new Response("", { status: segmentRes.status });
       }
@@ -197,7 +195,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 ومعالجة روابط القطع بشكل متزامن ودقيق
+  // 6. توليد ملف M3U8 مع ضمان السرعة الفائقة لعمليات التحديث (Refresh)
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -278,7 +276,7 @@ export async function onRequest(context) {
         headers: {
           "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
         }
       });
 
@@ -290,7 +288,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Anti-Drop Proxy is Active!", {
+  return new Response("Ultra-Fast Live Stream Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
