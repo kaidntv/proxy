@@ -67,6 +67,37 @@ export async function onRequest(context) {
     }
   }
 
+  // 1.5. جلب تفاصيل مباراة/حدث معين وسيرفراتها (/api/events/{id}) [المسار المضاف حديثاً]
+  if (subPath.startsWith("events/") && subPath !== "events") {
+    const eventId = subPath.split("/")[1];
+    try {
+      const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { 
+        headers: YACINE_HEADERS,
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+      const t = res.headers.get('T') || res.headers.get('t') || "";
+      const decryptedText = decryptYacine(await res.text(), t);
+      
+      let streamsList = [{ quality: "Server 1", url: `${origin}/api/stream/${eventId}.m3u8` }];
+      try {
+        const json = JSON.parse(decryptedText);
+        const servers = json.data?.servers || json.servers || json.data;
+        if (Array.isArray(servers) && servers.length > 0) {
+          streamsList = servers.map((s, idx) => ({
+            quality: s.quality || `Server ${idx + 1}`,
+            url: `${origin}/api/stream/${eventId}.m3u8?server=${idx}`
+          }));
+        }
+      } catch (e) {}
+
+      return new Response(JSON.stringify({ streams: streamsList }), {
+        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ streams: [] }), { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+  }
+
   // 2. جلب التصنيفات
   if (subPath === "categories") {
     try {
