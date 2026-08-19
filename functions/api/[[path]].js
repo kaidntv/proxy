@@ -11,14 +11,17 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
+  // إضافة الهيدرز الأساسية التي تتطلبها سيرفرات الـ CDN لمنع الحظر أو القطع
   const STREAM_HEADERS = { 
     "User-Agent": "okhttp/4.12.0",
     "Accept": "*/*",
-    "Connection": "Keep-Alive"
+    "Connection": "Keep-Alive",
+    "Referer": "https://x.com/",
+    "Origin": "https://x.com"
   };
 
   function decryptYacine(encryptedData, headerT) {
-    The fullKey = BASE_KEY + headerT;
+    const fullKey = BASE_KEY + headerT;
     const binaryString = atob(encryptedData);
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
@@ -33,7 +36,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي القطع مع ضبط الـ Content-Type حصرياً إلى video/mp4 ليتوافق مع fMP4
+  // 1. بروكسي القطع مع تحسين معالجة الأخطاء ودعم الـ Range والهيدرز الكاملة
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -51,11 +54,15 @@ export async function onRequest(context) {
         cf: { cacheTtl: 0 }
       });
       
+      // إذا حدث خطأ في جلب القطعة من الـ CDN، نرجع استجابة فارغة بدلاً من إيقاف المشغل بالكامل
+      if (!segmentRes.ok) {
+        return new Response("", { status: segmentRes.status });
+      }
+
       const responseHeaders = new Headers();
       responseHeaders.set("Access-Control-Allow-Origin", "*");
       responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
 
-      // التصحيح الجذري: تحويل امتدادات pdf و js إلى video/mp4 لأن البث يعتمد على Fragmented MP4
       let contentType = segmentRes.headers.get("Content-Type") || "";
       if (segUrl.includes(".pdf") || segUrl.includes(".js") || contentType.includes("pdf") || contentType.includes("javascript") || contentType.includes("text")) {
         contentType = "video/mp4";
@@ -76,7 +83,7 @@ export async function onRequest(context) {
         headers: responseHeaders
       });
     } catch (err) {
-      return new Response("Segment Proxy Error", { status: 500 });
+      return new Response("", { status: 500 });
     }
   }
 
@@ -190,7 +197,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 ومعالجة روابط القطع ووسوم الـ EXT-X-MAP
+  // 6. توليد ملف M3U8 ومعالجة روابط القطع بشكل متزامن ودقيق
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -283,7 +290,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("fMP4 Mime-Fixed Proxy is Active!", {
+  return new Response("Anti-Drop Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
