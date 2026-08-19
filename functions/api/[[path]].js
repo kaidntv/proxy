@@ -11,11 +11,11 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
   
-  // ترويسات دقيقة ومتكاملة لكل قطعة لضمان عدم توقف الـ CDN
+  // ترويسات ثابتة تطابق التطبيق الرسمي تماماً وتمنع الحظر
   const STREAM_HEADERS = { 
     "User-Agent": "okhttp/4.12.0",
-    "Referer": "http://re.ycn-redirect.online/",
-    "Accept": "*/*"
+    "Accept": "*/*",
+    "Connection": "Keep-Alive"
   };
 
   function decryptYacine(encryptedData, headerT) {
@@ -34,7 +34,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. بروكسي الأجزاء المحسّن لمنع التوقف المفاجئ
+  // 1. بروكسي الأجزاء الداعم لملفات الـ .pdf والـ Streaming بدون توقف
   if (subPath === "proxy_segment") {
     const segUrl = url.searchParams.get("url");
     if (!segUrl) return new Response("Missing URL", { status: 400 });
@@ -46,7 +46,8 @@ export async function onRequest(context) {
         return new Response("Segment Fetch Failed", { status: segmentRes.status });
       }
 
-      const contentType = segmentRes.headers.get("Content-Type") || "application/javascript";
+      // الحفاظ على نوع المحتوى أو اعتباره تدفق بيانات سليماً
+      const contentType = segmentRes.headers.get("Content-Type") || "application/octet-stream";
 
       return new Response(segmentRes.body, {
         status: segmentRes.status,
@@ -171,7 +172,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 6. توليد ملف M3U8 وتوجيه روابط الـ .js إلى البروكسي
+  // 6. توليد ملف M3U8 وإجبار كافة القطع (بما فيها .pdf) على المرور عبر البروكسي
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -221,6 +222,7 @@ export async function onRequest(context) {
       const originBase = `${urlObj.protocol}//${urlObj.host}`;
       const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
 
+      // إعادة كتابة كل الروابط لتمريرها عبر بروكسي الووركر إجبارياً
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('#')) {
@@ -254,7 +256,7 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Stable Proxy is Active!", {
+  return new Response("PDF-Stream Proxy is Active!", {
     headers: { "Content-Type": "text/plain" }
   });
 }
