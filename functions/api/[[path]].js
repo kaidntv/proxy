@@ -3,7 +3,11 @@ const activeSessions = new Map();
 export async function onRequest(context) {
   const { request, env, params } = context;
   const url = new URL(request.url);
-  const pathSegments = params.path || [];
+  
+  let pathSegments = params.path || [];
+  if (pathSegments[0] === 'api') {
+    pathSegments.shift();
+  }
   const subPath = pathSegments.join('/');
   const origin = url.origin;
 
@@ -51,7 +55,7 @@ export async function onRequest(context) {
     return "";
   }
 
-  // 1. جلب المباريات
+  // 1. API: جلب جدول المباريات والأحداث
   if (subPath === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -67,7 +71,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب التصنيفات
+  // 2. API: جلب التصنيفات والأقسام الرئيسية
   if (subPath === "categories") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/categories", { 
@@ -83,7 +87,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. جلب القنوات
+  // 3. API: جلب قنوات تصنيف معين وتوجيه روابطها
   if (subPath.startsWith("categories/") && subPath.endsWith("/channels")) {
     const categoryId = subPath.split("/")[1] || "1";
     try {
@@ -112,7 +116,24 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. معالجة البث وتثبيت رابط الـ CDN النهائي لمنع قفز السيرفرات والتوقف
+  // 4. API: جلب تفاصيل قناة منفردة فك تشفير مباشر
+  if (subPath.startsWith("channel/")) {
+    const channelId = subPath.split("/")[1];
+    try {
+      const res = await fetch(`https://def.yacinelive.com/api/channel/${channelId}`, { 
+        headers: YACINE_HEADERS,
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+      const t = res.headers.get('T') || res.headers.get('t') || "";
+      return new Response(decryptYacine(await res.text(), t), {
+        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+  }
+
+  // 5. API: معالجة البث، تثبيت الجلسة، وسحب القطع
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -124,13 +145,11 @@ export async function onRequest(context) {
       const session = activeSessions.get(sessionKey);
       const now = Date.now();
 
-      // إذا كانت الجلسة محفوظة ولم يمض عليها 15 دقيقة، نستخدم رابط الـ CDN النهائي الثابت مباشرة
       if (session && (now - session.time < 900000)) {
         finalCdnPlaylistUrl = session.url;
       } else {
         let rawRedirectUrl = "";
 
-        // جلب وفك تشفير بيانات القناة لمرة واحدة
         try {
           const chRes = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
             headers: YACINE_HEADERS,
@@ -155,7 +174,6 @@ export async function onRequest(context) {
 
         if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
 
-        // اتباع الـ Redirect (302) للحصول على رابط الـ CDN النهائي واستقرار المسار
         const redirectRes = await fetch(rawRedirectUrl, {
           headers: {
             "User-Agent": "okhttp/4.12.0",
@@ -167,11 +185,10 @@ export async function onRequest(context) {
 
         if (!redirectRes.ok) return new Response(`Redirect Error: ${redirectRes.status}`, { status: redirectRes.status });
 
-        finalCdnPlaylistUrl = redirectRes.url; // رابط الـ CDN النهائي والثابت
+        finalCdnPlaylistUrl = redirectRes.url; 
         activeSessions.set(sessionKey, { url: finalCdnPlaylistUrl, time: now });
       }
 
-      // جلب ملف الـ M3U8 مباشرة من نفس سيرفر الـ CDN الثابت
       const streamRes = await fetch(finalCdnPlaylistUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -190,7 +207,6 @@ export async function onRequest(context) {
       const parsedFinalUrl = new URL(finalUrl);
       const cdnOrigin = parsedFinalUrl.origin; 
 
-      // إعادة كتابة المسارات النسبية للقطع لتعمل بسلاسة مطلقة
       const rewrittenLines = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
         if (!trimmed) return line;
@@ -232,5 +248,5 @@ export async function onRequest(context) {
     }
   }
 
-  return new Response("Yacine Stable-Session Worker Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("Yacine All-APIs Worker Active!", { headers: { "Content-Type": "text/plain" } });
 }
