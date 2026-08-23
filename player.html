@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Player</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
@@ -13,6 +13,7 @@
             position: relative;
             width: 100vw;
             height: 100vh;
+            height: 100dvh;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -27,35 +28,32 @@
 
         video.fill-mode { object-fit: cover; }
 
-        .controls-overlay {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 70%, rgba(0,0,0,0.9) 100%);
-            opacity: 1;
-            visibility: visible;
-            transition: opacity 0.25s ease, visibility 0.25s ease;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        .controls-overlay.hidden {
-            opacity: 0;
-            visibility: hidden;
-        }
-
-        .controls-overlay > * { pointer-events: auto; }
-
+        /* الأزرار العلوية - تظهر وتختفي */
         .top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             padding: 12px 16px;
+            padding-top: max(12px, env(safe-area-inset-top));
             gap: 10px;
             flex-wrap: wrap;
+            z-index: 20;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: none;
         }
+
+        .top-bar.hidden-top {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+
+        .top-bar > * { pointer-events: auto; }
 
         .quality-group {
             display: flex;
@@ -65,22 +63,23 @@
         }
 
         .quality-btn {
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(0,0,0,0.5);
             color: #d1d5db;
-            border: 1px solid rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
             padding: 5px 14px;
             border-radius: 16px;
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             transition: all 0.2s;
         }
 
         .quality-btn.active {
             border-color: #e53935;
             color: #fff;
-            background: rgba(229, 57, 53, 0.35);
+            background: rgba(229, 57, 53, 0.4);
         }
 
         .top-right {
@@ -99,11 +98,11 @@
         }
 
         .icon-mini {
-            background: rgba(255,255,255,0.12);
-            border: none;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.2);
             color: #fff;
-            width: 30px;
-            height: 30px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             font-size: 13px;
             cursor: pointer;
@@ -112,16 +111,28 @@
             justify-content: center;
         }
 
+        /* أزرار الوسط - تظهر وتختفي */
         .center-controls {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 28px;
             direction: ltr;
+            z-index: 20;
+            transition: opacity 0.3s ease;
+            opacity: 1;
+        }
+
+        .center-controls.hidden-center {
+            opacity: 0;
         }
 
         .exo-btn {
-            background: rgba(0, 0, 0, 0.35);
+            background: rgba(0, 0, 0, 0.4);
             border: none;
             color: #fff;
             width: 44px;
@@ -132,38 +143,54 @@
             justify-content: center;
             cursor: pointer;
             backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
             transition: transform 0.1s;
         }
 
         .exo-btn:active { transform: scale(0.85); }
         .exo-btn svg { width: 22px; height: 22px; fill: #fff; }
-        .exo-btn.play-pause { width: 60px; height: 60px; }
-        .exo-btn.play-pause svg { width: 32px; height: 32px; }
+        .exo-btn.play-pause { width: 58px; height: 58px; }
+        .exo-btn.play-pause svg { width: 30px; height: 30px; }
 
+        /* الشريط السفلي - ظاهر دائماً */
         .bottom-bar {
-            padding: 8px 16px 12px;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 16px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
+            background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, transparent 100%);
+            z-index: 15;
         }
 
         .bottom-actions {
             display: flex;
             justify-content: center;
+            align-items: center;
             gap: 14px;
             direction: ltr;
         }
 
         .icon-btn {
-            background: none;
-            border: none;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
             color: #fff;
             cursor: pointer;
-            opacity: 0.75;
-            padding: 4px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
         }
 
-        .icon-btn svg { width: 20px; height: 20px; fill: #fff; }
+        .icon-btn:active { transform: scale(0.9); }
+        .icon-btn svg { width: 18px; height: 18px; fill: #fff; }
 
         .timeline-row {
             display: flex;
@@ -187,8 +214,8 @@
 
         .progress-bar::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             background: #2196F3;
         }
@@ -199,57 +226,57 @@
 <div class="player-wrapper" id="playerWrapper">
     <video id="video" playsinline autoplay></video>
 
-    <div class="controls-overlay" id="overlay">
-        
-        <div class="top-bar">
-            <div class="quality-group" id="controls"></div>
-            <div class="top-right">
-                <span class="live-badge">LIVE</span>
-                <button class="icon-mini" id="fitBtn" onclick="toggleFitFill()">⛶</button>
-                <button class="icon-mini" onclick="history.back()">✕</button>
-            </div>
+    <!-- الشريط العلوي -->
+    <div class="top-bar" id="topBar">
+        <div class="quality-group" id="controls"></div>
+        <div class="top-right">
+            <span class="live-badge">LIVE</span>
+            <button class="icon-mini" id="fitBtn" onclick="toggleFitFill()">⛶</button>
+            <button class="icon-mini" onclick="history.back()">✕</button>
+        </div>
+    </div>
+
+    <!-- أزرار الوسط -->
+    <div class="center-controls" id="centerControls">
+        <button class="exo-btn" onclick="seek(-10)">
+            <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+        </button>
+
+        <button class="exo-btn play-pause" onclick="togglePlay()">
+            <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+        </button>
+
+        <button class="exo-btn" onclick="seek(10)">
+            <svg viewBox="0 0 24 24"><path d="M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62c-1.39-1.16-3.16-1.88-5.12-1.88-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z"/></svg>
+        </button>
+    </div>
+
+    <!-- الشريط السفلي - ظاهر دائماً -->
+    <div class="bottom-bar">
+        <div class="bottom-actions">
+            <button class="icon-btn" onclick="togglePip()">
+                <svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>
+            </button>
+            <button class="icon-btn" onclick="toggleFullscreen()">
+                <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+            </button>
         </div>
 
-        <div class="center-controls">
-            <button class="exo-btn" onclick="seek(-10)">
-                <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
-            </button>
-
-            <button class="exo-btn play-pause" onclick="togglePlay()">
-                <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-            </button>
-
-            <button class="exo-btn" onclick="seek(10)">
-                <svg viewBox="0 0 24 24"><path d="M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62c-1.39-1.16-3.16-1.88-5.12-1.88-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z"/></svg>
-            </button>
+        <div class="timeline-row">
+            <span id="currentTime">00:00</span>
+            <input type="range" class="progress-bar" id="seekBar" value="0" min="0" max="100" step="0.1">
+            <span id="duration">00:00</span>
         </div>
-
-        <div class="bottom-bar">
-            <div class="bottom-actions">
-                <button class="icon-btn" onclick="togglePip()">
-                    <svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z"/></svg>
-                </button>
-                <button class="icon-btn" onclick="toggleFullscreen()">
-                    <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-                </button>
-            </div>
-
-            <div class="timeline-row">
-                <span id="currentTime">00:00</span>
-                <input type="range" class="progress-bar" id="seekBar" value="0" min="0" max="100" step="0.1">
-                <span id="duration">00:00</span>
-            </div>
-        </div>
-
     </div>
 </div>
 
 <script>
     const eventId = new URLSearchParams(window.location.search).get('id');
     const video = document.getElementById('video');
-    const overlay = document.getElementById('overlay');
     const playerWrapper = document.getElementById('playerWrapper');
+    const topBar = document.getElementById('topBar');
+    const centerControls = document.getElementById('centerControls');
     const seekBar = document.getElementById('seekBar');
     let hls = null, servers = [], current = 0, hideTimeout = null, isFill = false;
 
@@ -341,41 +368,43 @@
     }
 
     // ====== نظام الإظهار والإخفاء ======
-    function showOverlay() {
-        overlay.classList.remove('hidden');
+    function showControls() {
+        topBar.classList.remove('hidden-top');
+        centerControls.classList.remove('hidden-center');
         clearTimeout(hideTimeout);
-        startHideTimer();
+        hideTimeout = setTimeout(hideControls, 4000);
     }
 
-    function hideOverlay() {
+    function hideControls() {
         if (!video.paused) {
-            overlay.classList.add('hidden');
+            topBar.classList.add('hidden-top');
+            centerControls.classList.add('hidden-center');
+        }
+    }
+
+    function toggleControls() {
+        if (topBar.classList.contains('hidden-top')) {
+            showControls();
+        } else {
+            hideControls();
         }
     }
 
     function startHideTimer() {
         clearTimeout(hideTimeout);
-        hideTimeout = setTimeout(hideOverlay, 3000);
+        hideTimeout = setTimeout(hideControls, 4000);
     }
 
-    function toggleOverlay() {
-        if (overlay.classList.contains('hidden')) {
-            showOverlay();
-        } else {
-            hideOverlay();
-        }
-    }
-
-    // النقر على الفيديو يظهر/يخفي
+    // النقر يظهر/يخفي
     playerWrapper.addEventListener('click', (e) => {
         if (e.target === video || e.target === playerWrapper) {
-            toggleOverlay();
+            toggleControls();
         }
     });
 
-    // أي حركة تظهر الأزرار
-    playerWrapper.addEventListener('mousemove', showOverlay);
-    playerWrapper.addEventListener('touchstart', showOverlay, { passive: true });
+    // اللمس يظهر
+    playerWrapper.addEventListener('touchstart', showControls, { passive: true });
+    playerWrapper.addEventListener('mousemove', showControls);
 
     function toggleFullscreen() {
         if (!document.fullscreenElement) playerWrapper.requestFullscreen();
