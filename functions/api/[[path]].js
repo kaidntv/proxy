@@ -56,7 +56,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 2. تفاصيل مباراة - يرجع streams ======
+  // ====== 2. تفاصيل مباراة ======
   if (subPath.startsWith("events/")) {
     const eventId = subPath.split("/")[1];
     try {
@@ -77,15 +77,15 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - يستخدم event data مباشرة ======
+  // ====== 3. البث ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
-    const eventId = lastSegment.replace(".m3u8", "");
+    const targetId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
-    const m3u8CacheKey = `m3u8_${eventId}_${serverIndex}`;
+    const m3u8CacheKey = `m3u8_${targetId}_${serverIndex}`;
 
     try {
-      // جرب من الكاش
+      // جرب الكاش
       try {
         const cachedM3u8 = await env.YACINE_CACHE.get(m3u8CacheKey, 'text');
         if (cachedM3u8) {
@@ -96,15 +96,24 @@ export async function onRequest(context) {
         }
       } catch (e) {}
 
-      // جلب بيانات الحدث
+      // جلب بيانات الحدث - نفس المصدر
       const eventData = await getCachedOrFetch(
-        `event_v1_${eventId}`, 
-        `https://def.yacinelive.com/api/event/${eventId}`, 
+        `event_v1_${targetId}`, 
+        `https://def.yacinelive.com/api/event/${targetId}`, 
         CACHE_DURATION.events
       );
       
-      const json = JSON.parse(eventData);
-      const servers = json.data || [];
+      // إصلاح الاستخراج - البيانات قد تكون متداخلة
+      let json;
+      try {
+        json = JSON.parse(eventData);
+      } catch (e) {
+        // إذا كان JSON داخل JSON
+        const temp = JSON.parse(eventData);
+        json = JSON.parse(temp.data);
+      }
+      
+      const servers = json.data || json || [];
       const server = servers[serverIndex] || servers[0];
       
       if (!server || !server.url) {
@@ -115,11 +124,7 @@ export async function onRequest(context) {
       const userAgent = server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
       const referer = server.referer || "";
       
-      // جلب M3U8 مع Headers
-      const headers = {
-        "User-Agent": userAgent,
-        "Accept": "*/*"
-      };
+      const headers = { "User-Agent": userAgent, "Accept": "*/*" };
       if (referer && referer !== '') headers["Referer"] = referer;
       
       const m3u8Res = await fetch(streamUrl, { headers });
@@ -129,8 +134,6 @@ export async function onRequest(context) {
       }
       
       const playlistText = await m3u8Res.text();
-      
-      // إعادة كتابة المسارات
       const parsedUrl = new URL(streamUrl);
       const cdnOrigin = parsedUrl.origin;
       const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
@@ -146,19 +149,11 @@ export async function onRequest(context) {
       });
       
       const finalM3u8 = rewritten.join('\n');
-      
-      // خزن في الكاش
-      try { 
-        await env.YACINE_CACHE.put(m3u8CacheKey, finalM3u8, { expirationTtl: CACHE_DURATION.m3u8_cache }); 
-      } catch (e) {}
+      try { await env.YACINE_CACHE.put(m3u8CacheKey, finalM3u8, { expirationTtl: CACHE_DURATION.m3u8_cache }); } catch (e) {}
       
       return new Response(finalM3u8, {
         status: 200,
-        headers: {
-          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=10"
-        }
+        headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=10" }
       });
 
     } catch (err) {
