@@ -213,7 +213,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - تحويل إلى re.new-redirect.online ======
+  // ====== 3. البث - re.new-redirect.online دائماً ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -223,17 +223,17 @@ export async function onRequest(context) {
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
       
-      let rawRedirectUrl = extractUrlFromDecrypted(decryptedText);
-      if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
+      let rawUrl = extractUrlFromDecrypted(decryptedText);
+      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // استخرج token و expiry من الرابط
-      const urlObj = new URL(rawRedirectUrl);
+      // استخرج المعلومات من أي رابط
+      const urlObj = new URL(rawUrl);
       const pathParts = urlObj.pathname.split('/');
       const liveId = pathParts[2];
       const token = urlObj.searchParams.get('t');
       const expiry = urlObj.searchParams.get('e');
       
-      // أنشئ الرابط الصحيح
+      // استخدم re.new-redirect.online دائماً
       const correctUrl = `http://re.new-redirect.online/live/${liveId}/index.m3u8?t=${token}&e=${expiry}`;
       
       return Response.redirect(correctUrl, 302);
