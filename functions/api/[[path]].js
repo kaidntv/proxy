@@ -2,7 +2,7 @@ const SECRET_KEY = "Yacine2026@SecretKey!";
 const ADMIN_PASSWORD = "Admin@2026";
 
 export async function onRequest(context) {
-  const { request, params, env } = context;
+  const { request, params } = context;
   const url = new URL(request.url);
   const cache = caches.default;
   
@@ -86,7 +86,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // ====== 1. التصنيفات ======
+  // ====== 1. التصنيفات (كاش 30 يوم) ======
   if (subPath === "categories") {
     const cacheKey = new Request(url.toString());
     const cachedResponse = await cache.match(cacheKey);
@@ -114,7 +114,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 2. كل القنوات ======
+  // ====== 2. كل القنوات (كاش 30 يوم) ======
   if (subPath === "all-channels") {
     const cacheKey = new Request(url.toString());
     const cachedResponse = await cache.match(cacheKey);
@@ -167,31 +167,18 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - كاش ذكي متعدد الطبقات ======
+  // ====== 3. البث - كاش 5 ثوانٍ فقط، بدون KV ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     
-    // طبقة 1: Cache API (10 ثوانٍ)
+    // كاش 5 ثوانٍ فقط
     const m3u8CacheKey = new Request(url.toString());
     const cachedM3u8 = await cache.match(m3u8CacheKey);
     if (cachedM3u8) return cachedM3u8;
     
-    // طبقة 2: KV (دقيقة واحدة للرابط)
-    const kvKey = `stream_${targetId}`;
-    let streamInfo = null;
-    
-    if (env && env.YACINE_CACHE) {
-      try {
-        streamInfo = await env.YACINE_CACHE.get(kvKey, 'json');
-        if (streamInfo && (Date.now() - streamInfo.time > 60000)) {
-          streamInfo = null;
-        }
-      } catch (e) {}
-    }
-    
-    if (!streamInfo) {
-      // جلب من Yacine
+    try {
+      // جلب جديد كل مرة - بدون KV
       const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
         headers: YACINE_HEADERS,
         cache: "no-store"
@@ -202,68 +189,62 @@ export async function onRequest(context) {
       const json = JSON.parse(decryptedText);
       const server = json.data[0];
       
-      streamInfo = {
-        url: server.url.replace(/\\u0026/g, '&'),
-        userAgent: server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        referer: server.headers?.["Referer"] || server.referer || "https://x.com/",
-        time: Date.now()
-      };
+      const streamUrl = server.url.replace(/\\u0026/g, '&');
+      const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+      const referer = server.headers?.["Referer"] || server.referer || "https://x.com/";
       
-      // خزن في KV لمدة دقيقة
-      if (env && env.YACINE_CACHE) {
+      // جلب M3U8 فوراً
+      const m3u8Res = await fetch(streamUrl, {
+        headers: {
+          "User-Agent": userAgent,
+          "Referer": referer,
+          "Accept": "*/*"
+        },
+        cache: "no-store"
+      });
+      
+      if (!m3u8Res.ok) {
+        return new Response(`CDN Error: ${m3u8Res.status}`, { status: m3u8Res.status });
+      }
+      
+      const playlistText = await m3u8Res.text();
+      
+      const parsedUrl = new URL(streamUrl);
+      const cdnOrigin = parsedUrl.origin;
+      const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
+      
+      const rewrittenLines = playlistText.split('\n').map(line => {
+        let trimmed = line.trim();
+        if (!trimmed) return line;
+        if (trimmed.startsWith('#')) return line;
         try {
-          await env.YACINE_CACHE.put(kvKey, JSON.stringify(streamInfo), { expirationTtl: 60 });
-        } catch (e) {}
-      }
-    }
-    
-    // جلب M3U8
-    const m3u8Res = await fetch(streamInfo.url, {
-      headers: {
-        "User-Agent": streamInfo.userAgent,
-        "Referer": streamInfo.referer,
-        "Accept": "*/*"
-      },
-      cache: "no-store"
-    });
-    
-    if (!m3u8Res.ok) {
-      return new Response(`CDN Error: ${m3u8Res.status}`, { status: m3u8Res.status });
-    }
-    
-    const playlistText = await m3u8Res.text();
-    
-    const parsedUrl = new URL(streamInfo.url);
-    const cdnOrigin = parsedUrl.origin;
-    const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
-    
-    const rewrittenLines = playlistText.split('\n').map(line => {
-      let trimmed = line.trim();
-      if (!trimmed) return line;
-      if (trimmed.startsWith('#')) return line;
-      try {
-        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-        if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
-        return `${cdnOrigin}${cdnPath}/${trimmed}`;
-      } catch (e) {
-        return trimmed;
-      }
-    });
-    
-    const response = new Response(rewrittenLines.join('\n'), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=10"
-      }
-    });
-    
-    // خزن M3U8 في Cache API لمدة 10 ثوانٍ
-    context.waitUntil(cache.put(m3u8CacheKey, response.clone()));
-    
-    return response;
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+          if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
+          return `${cdnOrigin}${cdnPath}/${trimmed}`;
+        } catch (e) {
+          return trimmed;
+        }
+      });
+      
+      const response = new Response(rewrittenLines.join('\n'), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=5"
+        }
+      });
+      
+      // كاش 5 ثوانٍ فقط
+      context.waitUntil(cache.put(m3u8CacheKey, response.clone()));
+      
+      return response;
 
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { 
+        status: 500, headers: { "Content-Type": "application/json" } 
+      });
+    }
   }
 
   return new Response("Yacine Stable-Session Worker Active!", { 
