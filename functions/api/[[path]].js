@@ -86,52 +86,6 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  function extractUrlFromDecrypted(decryptedText) {
-    if (!decryptedText) return "";
-    let trimmed = decryptedText.trim();
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-    try {
-      const json = JSON.parse(trimmed);
-      const findUrl = (obj) => {
-        if (!obj) return "";
-        if (Array.isArray(obj)) {
-          for (const item of obj) {
-            const found = findUrl(item);
-            if (found) return found;
-          }
-          return "";
-        }
-        if (typeof obj === 'object') {
-          const urlProps = ['url', 'file', 'link', 'stream_url', 'play_url', 'src'];
-          for (const prop of urlProps) {
-            if (obj[prop] && typeof obj[prop] === 'string' && 
-                (obj[prop].startsWith('http://') || obj[prop].startsWith('https://'))) {
-              return obj[prop];
-            }
-          }
-          for (const key in obj) {
-            if (obj[key] && typeof obj[key] === 'string' && 
-                (obj[key].startsWith('http://') || obj[key].startsWith('https://'))) {
-              return obj[key];
-            }
-          }
-          for (const key in obj) {
-            if (typeof obj[key] === 'object') {
-              const found = findUrl(obj[key]);
-              if (found) return found;
-            }
-          }
-        }
-        return "";
-      };
-      const foundUrl = findUrl(json);
-      if (foundUrl) return foundUrl;
-    } catch (e) {}
-    const urlMatch = trimmed.match(/https?:\/\/[^\s"']+/);
-    if (urlMatch) return urlMatch[0];
-    return "";
-  }
-
   // ====== 1. التصنيفات ======
   if (subPath === "categories") {
     const cacheKey = new Request(url.toString());
@@ -213,30 +167,69 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - re.new-redirect.online دائماً ======
+  // ====== 3. البث - Proxy مع Headers من JSON ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     
     try {
-      const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
+      const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { 
+        headers: YACINE_HEADERS,
+        cache: "no-store"
+      });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
       
-      let rawUrl = extractUrlFromDecrypted(decryptedText);
-      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
-
-      // استخرج المعلومات من أي رابط
-      const urlObj = new URL(rawUrl);
-      const pathParts = urlObj.pathname.split('/');
-      const liveId = pathParts[2];
-      const token = urlObj.searchParams.get('t');
-      const expiry = urlObj.searchParams.get('e');
+      // استخرج JSON كامل
+      const json = JSON.parse(decryptedText);
+      const server = json.data[0];
       
-      // استخدم re.new-redirect.online دائماً
-      const correctUrl = `http://re.new-redirect.online/live/${liveId}/index.m3u8?t=${token}&e=${expiry}`;
+      const streamUrl = server.url.replace(/\\u0026/g, '&');
+      const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+      const referer = server.headers?.["Referer"] || server.referer || "https://x.com/";
       
-      return Response.redirect(correctUrl, 302);
+      // جلب M3U8 مع Headers الصحيحة
+      const m3u8Res = await fetch(streamUrl, {
+        headers: {
+          "User-Agent": userAgent,
+          "Referer": referer,
+          "Accept": "*/*"
+        },
+        cache: "no-store"
+      });
+      
+      if (!m3u8Res.ok) {
+        return new Response(`CDN Error: ${m3u8Res.status}`, { status: m3u8Res.status });
+      }
+      
+      const playlistText = await m3u8Res.text();
+      
+      // إعادة كتابة المسارات
+      const parsedUrl = new URL(streamUrl);
+      const cdnOrigin = parsedUrl.origin;
+      const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
+      
+      const rewrittenLines = playlistText.split('\n').map(line => {
+        let trimmed = line.trim();
+        if (!trimmed) return line;
+        if (trimmed.startsWith('#')) return line;
+        try {
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+          if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
+          return `${cdnOrigin}${cdnPath}/${trimmed}`;
+        } catch (e) {
+          return trimmed;
+        }
+      });
+      
+      return new Response(rewrittenLines.join('\n'), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store"
+        }
+      });
 
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { 
