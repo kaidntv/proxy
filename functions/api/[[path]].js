@@ -3,7 +3,7 @@ const CACHE_DURATION = {
   categories: 2592000000,
   events: 36000000,
   stream_url: 1800000,
-  redirect_cache: 1800
+  m3u8_cache: 60
 };
 
 const SECRET_KEY = "Yacine2026@SecretKey!";
@@ -229,18 +229,17 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - Redirect مباشر ======
+  // ====== 3. البث - Proxy مع كاش 60 ثانية ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     
-    const redirectCacheKey = new Request(`https://redirect/${targetId}`);
-    const cachedRedirect = await cache.match(redirectCacheKey);
-    if (cachedRedirect) {
-      return cachedRedirect;
-    }
+    const m3u8CacheKey = new Request(url.toString());
+    const cachedM3u8 = await cache.match(m3u8CacheKey);
+    if (cachedM3u8) return cachedM3u8;
     
     try {
+      // جلب من Yacine
       const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
@@ -248,31 +247,53 @@ export async function onRequest(context) {
       let rawRedirectUrl = extractUrlFromDecrypted(decryptedText);
       if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
 
-      const redirectRes = await fetch(rawRedirectUrl, {
+      // جلب M3U8 مع Headers الصحيحة
+      const streamRes = await fetch(rawRedirectUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Referer": "https://x.com/"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+          "Referer": "https://x.com/",
+          "Accept": "*/*"
         },
         redirect: "follow"
       });
 
-      if (!redirectRes.ok) {
-        return new Response(`Redirect Error: ${redirectRes.status}`, { status: redirectRes.status });
+      if (!streamRes.ok) {
+        return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
       }
 
-      const finalCdnUrl = redirectRes.url;
+      const playlistText = await streamRes.text();
+      const finalCdnUrl = streamRes.url;
+      const parsedUrl = new URL(finalCdnUrl);
+      const cdnOrigin = parsedUrl.origin;
+      const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
+
+      // إعادة كتابة المسارات
+      const rewrittenLines = playlistText.split('\n').map(line => {
+        let trimmed = line.trim();
+        if (!trimmed) return line;
+        if (trimmed.startsWith('#')) return line;
+        try {
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+          if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
+          return `${cdnOrigin}${cdnPath}/${trimmed}`;
+        } catch (e) {
+          return trimmed;
+        }
+      });
+
+      const finalM3u8 = rewrittenLines.join('\n');
       
-      // إنشاء Redirect بدون تعديل headers
-      const response = new Response(null, {
-        status: 302,
+      const response = new Response(finalM3u8, {
+        status: 200,
         headers: {
-          "Location": finalCdnUrl,
-          "Cache-Control": "public, max-age=1800",
-          "Access-Control-Allow-Origin": "*"
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=60"
         }
       });
       
-      context.waitUntil(cache.put(redirectCacheKey, response.clone()));
+      // خزن في Cache API لمدة 60 ثانية
+      context.waitUntil(cache.put(m3u8CacheKey, response.clone()));
       
       return response;
 
