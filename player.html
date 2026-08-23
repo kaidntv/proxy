@@ -31,12 +31,18 @@
         try {
             const res = await fetch(`/api/events/${eventId}`);
             const json = await res.json();
-            servers = json.data?.servers || json.servers || json.data || [];
+            const rawServers = json.data || [];
             
-            if (!servers.length) {
+            if (!rawServers.length) {
                 document.body.innerHTML = '<div style="color:#fff;text-align:center;padding:50px;">No streams available</div>';
                 return;
             }
+            
+            // استخدام /stream/ مع server index
+            servers = rawServers.map((s, i) => ({
+                name: s.name || 'Stream ' + (i + 1),
+                url: `/stream/${eventId}.m3u8?server=${i}`
+            }));
             
             renderButtons();
             play(0);
@@ -51,7 +57,7 @@
         servers.forEach((s, i) => {
             const btn = document.createElement('button');
             btn.className = 'quality-btn' + (i === currentIndex ? ' active' : '');
-            btn.innerText = s.name || 'Stream ' + (i + 1);
+            btn.innerText = s.name;
             btn.onclick = () => { currentIndex = i; play(i); renderButtons(); };
             el.appendChild(btn);
         });
@@ -59,41 +65,24 @@
 
     function play(index) {
         const server = servers[index];
-        if (!server || !server.url) return;
-        
-        const streamUrl = server.url.replace(/\\u0026/g, '&');
-        const userAgent = server.user_agent || server.headers?.["User-Agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+        if (!server) return;
         
         const video = document.getElementById('video');
-        
         if (hls) hls.destroy();
         
         if (Hls.isSupported()) {
-            hls = new Hls({
-                enableWorker: true,
-                lowLatencyMode: true,
-                xhrSetup: function(xhr) {
-                    xhr.setRequestHeader('User-Agent', userAgent);
-                    // لا نرسل Referer إذا كان فارغاً
-                    if (server.referer && server.referer !== '') {
-                        xhr.setRequestHeader('Referer', server.referer);
-                    }
-                }
-            });
-            hls.loadSource(streamUrl);
+            hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+            hls.loadSource(server.url);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
             hls.on(Hls.Events.ERROR, function(event, data) {
                 if (data.fatal) {
-                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                        hls.startLoad();
-                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        hls.recoverMediaError();
-                    }
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                    else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
                 }
             });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = streamUrl;
+            video.src = server.url;
             video.play();
         }
     }
