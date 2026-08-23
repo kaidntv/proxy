@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; height: 100vh; overflow: hidden; }
+        video { width: 100%; height: 100%; }
+        .controls { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 100; }
+        .quality-btn { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .quality-btn.active { background: #5b8def; border-color: #5b8def; }
+    </style>
+</head>
+<body>
+
+<video id="video" controls autoplay playsinline></video>
+<div class="controls" id="controls"></div>
+
+<script>
+    const eventId = new URLSearchParams(window.location.search).get('id');
+    let hls = null;
+    let servers = [];
+
+    async function load() {
+        try {
+            const res = await fetch(`/api/events/${eventId}`);
+            const json = await res.json();
+            servers = json.data?.servers || json.servers || json.data || [];
+            
+            if (!servers.length) return;
+            
+            renderButtons();
+            play(0);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function renderButtons() {
+        const el = document.getElementById('controls');
+        el.innerHTML = '';
+        servers.forEach((s, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'quality-btn' + (i === 0 ? ' active' : '');
+            btn.innerText = s.name || `Stream ${i+1}`;
+            btn.onclick = () => { play(i); renderButtons(); };
+            el.appendChild(btn);
+        });
+    }
+
+    function play(index) {
+        const server = servers[index];
+        if (!server || !server.url) return;
+        
+        const url = server.url.replace(/\\u0026/g, '&');
+        const video = document.getElementById('video');
+        
+        if (hls) hls.destroy();
+        
+        if (Hls.isSupported()) {
+            hls = new Hls({ enableWorker: true });
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+            video.play();
+        }
+    }
+
+    load();
+</script>
+
+</body>
+</html>
