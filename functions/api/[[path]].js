@@ -1,214 +1,159 @@
-export async function onRequest(context) {
-  const { request } = context;
-  const url = new URL(request.url);
-  const origin = url.origin;
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const origin = url.origin;
+    const path = url.pathname.replace('/api/', '').replace(/^\/+/, '');
 
-  let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
-  if (path.startsWith('api/')) {
-    path = path.slice(4);
-  } else if (path === 'api') {
-    path = '';
-  }
-  
-  const pathSegments = path.split('/');
+    const BASE_KEY = "c!xZj+N9&G@Ev@vw";
+    
+    // الهيدرات الرسمية للتطبيق
+    const YACINE_HEADERS = { 
+      "Accept": "application/json", 
+      "User-Agent": "okhttp/4.12.0" 
+    };
+    
+    const STREAM_HEADERS = {
+      "User-Agent": "okhttp/4.12.0",
+      "Referer": "http://re.ycn-redirect.com/"
+    };
 
-  const BASE_KEY = "c!xZj+N9&G@Ev@vw";
-  const YACINE_HEADERS = { 
-    "Accept": "application/json", 
-    "User-Agent": "okhttp/4.12.0" 
-  };
-
-  const STREAM_HEADERS = {
-    "User-Agent": "okhttp/4.12.0",
-    "Referer": "http://re.ycn-redirect.com/"
-  };
-
-  function decryptYacine(encryptedData, headerT) {
-    const fullKey = BASE_KEY + headerT;
-    const binaryString = atob(encryptedData);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const fullKeyBytes = new TextEncoder().encode(fullKey);
-    const decrypted = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      decrypted[i] = bytes[i] ^ fullKeyBytes[i % fullKeyBytes.length];
-    }
-    return new TextDecoder().decode(decrypted);
-  }
-
-  function extractUrlFromDecrypted(decryptedText) {
-    if (!decryptedText) return "";
-    let trimmed = decryptedText.trim();
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-    try {
-      const json = JSON.parse(trimmed);
-      const servers = json.data?.servers || json.servers || json.data || json;
-      if (Array.isArray(servers) && servers.length > 0) {
-        const s = servers[0];
-        return s?.url || s?.file || s?.link || "";
-      } else if (typeof servers === 'object' && servers !== null) {
-        return servers.url || servers.file || servers.link || "";
-      } else if (typeof servers === 'string' && (servers.startsWith('http://') || servers.startsWith('https://'))) {
-        return servers;
+    // 1. فك تشفير استجابات Yacine
+    function decryptYacine(encryptedData, headerT) {
+      const fullKey = BASE_KEY + headerT;
+      const binaryString = atob(encryptedData);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
       }
-    } catch (e) {
-      const match = decryptedText.match(/https?:\/\/[^\s"']+/);
-      if (match) return match[0];
-    }
-    return "";
-  }
-
-  // بروكسي ذكي لمعالجة ملفات .js الموهة واستعادتها كقطع فيديو .ts
-  async function proxyStream(targetUrl) {
-    try {
-      const isM3u8Request = targetUrl.includes(".m3u8");
-
-      const res = await fetch(targetUrl, {
-        headers: STREAM_HEADERS,
-        redirect: "follow",
-        cf: !isM3u8Request ? { cacheTtl: 300, cacheEverything: true } : { cacheTtl: 0, cacheEverything: false }
-      });
-
-      if (!res.ok) {
-        return new Response(`Error fetching source: ${res.status}`, { status: res.status });
+      const fullKeyBytes = new TextEncoder().encode(fullKey);
+      const decrypted = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        decrypted[i] = bytes[i] ^ fullKeyBytes[i % fullKeyBytes.length];
       }
+      return new TextDecoder().decode(decrypted);
+    }
 
-      const finalUrl = res.url;
-      const contentType = res.headers.get("content-type") || "";
+    // 2. استخراج رابط البث المباشر
+    function extractUrlFromDecrypted(decryptedText) {
+      if (!decryptedText) return "";
+      let trimmed = decryptedText.trim();
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+      try {
+        const json = JSON.parse(trimmed);
+        const servers = json.data?.servers || json.servers || json.data || json;
+        if (Array.isArray(servers) && servers.length > 0) {
+          const s = servers[0];
+          return s?.url || s?.file || s?.link || "";
+        }
+      } catch (e) {}
+      const urlMatch = trimmed.match(/https?:\/\/[^\s"']+/);
+      return urlMatch ? urlMatch[0] : "";
+    }
 
-      // 1. إذا كان الملف هو قائمة البث (.m3u8)
-      if (isM3u8Request || contentType.includes("mpegurl") || contentType.includes("m3u8")) {
-        const playlistText = await res.text();
+    // ====== 1. قائمة المباريات (Events) ======
+    if (path === "events") {
+      try {
+        const res = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
+        const t = res.headers.get('T') || res.headers.get('t') || "";
+        const data = decryptYacine(await res.text(), t);
+        
+        return new Response(data, {
+          headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+      }
+    }
+
+    // ====== 2. تفاصيل المباراة والسيرفرات (Event Details) ======
+    if (path.startsWith("events/")) {
+      const eventId = path.split("/")[1].replace(".m3u8", "");
+      try {
+        const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
+        const t = res.headers.get('T') || res.headers.get('t') || "";
+        const decryptedText = decryptYacine(await res.text(), t);
+        
+        const parsed = JSON.parse(decryptedText);
+        const servers = parsed.data?.servers || parsed.servers || [];
+        
+        const streamsList = servers.map((s, idx) => ({
+          quality: s.quality || s.name || `Server ${idx + 1}`,
+          url: `${origin}/api/stream/${eventId}.m3u8?server=${idx}`
+        }));
+
+        return new Response(JSON.stringify({ streams: streamsList }), {
+          headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+      }
+    }
+
+    // ====== 3. آلية جلب ورابط البث التشغيلي (Stream) ======
+    if (path.startsWith("stream/")) {
+      const targetId = path.split("/").pop().replace(".m3u8", "");
+      
+      try {
+        // جلب وتفكيك رابط المباراة الرسمي
+        const res = await fetch(`https://def.yacinelive.com/api/event/${targetId}`, { headers: YACINE_HEADERS });
+        const t = res.headers.get('T') || res.headers.get('t') || "";
+        const decrypted = decryptYacine(await res.text(), t);
+        const rawRedirectUrl = extractUrlFromDecrypted(decrypted);
+
+        if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
+
+        // تتبع التوجيه (302) باستخدام الهيدرات الرسمية للحصول على رابط الـ CDN النهائي
+        const redirectRes = await fetch(rawRedirectUrl, { headers: STREAM_HEADERS, redirect: "follow" });
+        const finalCdnPlaylistUrl = redirectRes.url;
+
+        // جلب ملف الـ M3U8
+        const playlistRes = await fetch(finalCdnPlaylistUrl, { headers: STREAM_HEADERS });
+        const playlistText = await playlistRes.text();
+
+        // تحويل روابط قطع الفيديو الموهة (.js/.ts) وتمريرها عبر البروكسي
         const rewritten = playlistText.split('\n').map(line => {
           let trimmed = line.trim();
-          if (!trimmed) return line;
-
-          if (trimmed.startsWith('#')) {
-            if (trimmed.includes('URI=')) {
-              return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
-                try {
-                  const abs = new URL(uriValue, finalUrl).href;
-                  return `URI="${origin}/api/proxy?url=${encodeURIComponent(abs)}"`;
-                } catch (e) {
-                  return match;
-                }
-              });
-            }
-            return line;
-          }
-
-          // توجيه كل السطور (بما فيها .js) عبر البروكسي
+          if (!trimmed || trimmed.startsWith('#')) return line;
           try {
-            const abs = new URL(trimmed, finalUrl).href;
-            return `${origin}/api/proxy?url=${encodeURIComponent(abs)}`;
+            const absChunkUrl = new URL(trimmed, finalCdnPlaylistUrl).href;
+            return `${origin}/api/proxy?url=${encodeURIComponent(absChunkUrl)}`;
           } catch (e) {
             return trimmed;
           }
         }).join('\n');
 
         return new Response(rewritten, {
-          status: 200,
           headers: {
             "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+            "Access-Control-Allow-Origin": "*"
           }
         });
-      } else {
-        // 2. إذا كانت قطعة فيديو موهة بصيغة .js أو غيرها، نغير صيغتها إلى video/mp2t
-        const responseHeaders = new Headers();
-        responseHeaders.set("Content-Type", "video/mp2t"); 
-        responseHeaders.set("Access-Control-Allow-Origin", "*");
-        responseHeaders.set("Cache-Control", "public, max-age=3600");
+      } catch (err) {
+        return new Response(`Stream Error: ${err.message}`, { status: 500 });
+      }
+    }
 
-        const len = res.headers.get("content-length");
-        if (len) responseHeaders.set("Content-Length", len);
+    // ====== 4. البروكسي الخاص بقطع الفيديو (.js / .ts) ======
+    if (path === "proxy") {
+      const targetUrl = url.searchParams.get("url");
+      if (!targetUrl) return new Response("Missing url param", { status: 400 });
 
+      try {
+        const res = await fetch(targetUrl, { headers: STREAM_HEADERS, redirect: "follow" });
+        
         return new Response(res.body, {
           status: 200,
-          headers: responseHeaders
+          headers: {
+            "Content-Type": "video/mp2t",
+            "Access-Control-Allow-Origin": "*"
+          }
         });
+      } catch (e) {
+        return new Response(`Proxy Error: ${e.message}`, { status: 500 });
       }
-    } catch (err) {
-      return new Response(`Proxy Error: ${err.message}`, { status: 500 });
     }
+
+    return new Response("Not Found", { status: 404 });
   }
-
-  // 1. مسار البروكسي
-  if (path === "proxy") {
-    const targetUrl = url.searchParams.get("url");
-    if (!targetUrl) return new Response("Missing url param", { status: 400 });
-    return await proxyStream(targetUrl);
-  }
-
-  // 2. قائمة المباريات
-  if (path === "events") {
-    try {
-      const res = await fetch("https://def.yacinelive.com/api/events", { 
-        headers: YACINE_HEADERS,
-        cf: { cacheTtl: 0, cacheEverything: false }
-      });
-      const t = res.headers.get('T') || res.headers.get('t') || "";
-      return new Response(decryptYacine(await res.text(), t), {
-        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, data: [] }), { 
-        status: 500, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } 
-      });
-    }
-  }
-
-  // 3. تشغيل القناة مباشرة
-  if (pathSegments[0] === "channel" && pathSegments.length > 1) {
-    const channelId = pathSegments[1].replace(".m3u8", "");
-    try {
-      const res = await fetch(`https://def.yacinelive.com/api/channel/${channelId}`, { headers: YACINE_HEADERS });
-      const t = res.headers.get('T') || res.headers.get('t') || "";
-      const decrypted = decryptYacine(await res.text(), t);
-      const streamUrl = extractUrlFromDecrypted(decrypted);
-      if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-      return await proxyStream(streamUrl);
-    } catch (e) {
-      return new Response(`Channel Error: ${e.message}`, { status: 500 });
-    }
-  }
-
-  // 4. تفاصيل أو تشغيل المباراة
-  if (pathSegments[0] === "events" && pathSegments.length > 1) {
-    const rawId = pathSegments[1];
-    const eventId = rawId.replace(".m3u8", "");
-
-    try {
-      const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
-      const t = res.headers.get('T') || res.headers.get('t') || "";
-      if (!t) return new Response(JSON.stringify({ error: "Invalid Event ID" }), { status: 404 });
-      
-      const decryptedText = decryptYacine(await res.text(), t);
-
-      if (rawId.endsWith(".m3u8")) {
-        const streamUrl = extractUrlFromDecrypted(decryptedText);
-        if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-        return await proxyStream(streamUrl);
-      }
-
-      const parsedData = JSON.parse(decryptedText);
-      const rawServers = parsedData.data?.servers || parsedData.servers || parsedData.data || [];
-      const proxiedServers = Array.isArray(rawServers) ? rawServers.map((s, idx) => ({
-        name: s.name || s.quality || `Server ${idx + 1}`,
-        url: `${origin}/api/proxy?url=${encodeURIComponent(s.url)}`
-      })) : [];
-
-      return new Response(JSON.stringify({ servers: proxiedServers }), {
-        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
-      });
-    } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
-    }
-  }
-
-  return new Response(JSON.stringify({ error: "Endpoint not found" }), { status: 404 });
-}
+};
