@@ -1,8 +1,6 @@
 const CACHE_DURATION = {
-  events: 36000000,
-  stream_url: 2592000000,
-  stream_session: 1800000,
-  m3u8_cache: 30
+  events: 60000,
+  m3u8: 10
 };
 
 const BASE_KEY = "c!xZj+N9&G@Ev@vw";
@@ -16,6 +14,7 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const subPath = (params.path || []).join('/');
   const origin = url.origin;
+  const cache = caches.default;
 
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
@@ -29,111 +28,83 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  async function getCachedOrFetch(cacheKey, fetchUrl, duration) {
-    const now = Date.now();
-    try {
-      const cached = await env.YACINE_CACHE.get(cacheKey, 'json');
-      if (cached && cached.data && (now - cached.time < duration)) return cached.data;
-    } catch (e) {}
-    const res = await fetch(fetchUrl, { headers: YACINE_HEADERS });
-    const t = res.headers.get('T') || res.headers.get('t') || "";
-    const data = decryptYacine(await res.text(), t);
-    try {
-      await env.YACINE_CACHE.put(cacheKey, JSON.stringify({ data, time: now }), { expirationTtl: Math.floor(duration / 1000) });
-    } catch (e) {}
-    return data;
-  }
-
-  // ====== 1. المباريات ======
+  // ====== المباريات ======
   if (subPath === "events") {
+    const cacheKey = new Request(url.toString());
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+    
     try {
-      const data = await getCachedOrFetch("events_v1", "https://def.yacinelive.com/api/events", CACHE_DURATION.events);
-      return new Response(data, {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=36000" }
+      const res = await fetch("https://def.yacinelive.com/api/events", { headers: YACINE_HEADERS });
+      const t = res.headers.get('T') || res.headers.get('t') || "";
+      const data = decryptYacine(await res.text(), t);
+      const response = new Response(data, {
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=60" }
       });
+      context.waitUntil(cache.put(cacheKey, response.clone()));
+      return response;
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, data: [] }), { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+      return new Response(JSON.stringify({ error: err.message, data: [] }), { status: 500 });
     }
   }
 
-  // ====== 2. تفاصيل مباراة ======
+  // ====== تفاصيل المباراة والسيرفرات ======
   if (subPath.startsWith("events/")) {
     const eventId = subPath.split("/")[1];
+    const cacheKey = new Request(url.toString());
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+    
     try {
-      const data = await getCachedOrFetch(`event_v1_${eventId}`, `https://def.yacinelive.com/api/event/${eventId}`, CACHE_DURATION.events);
-      const json = JSON.parse(data);
-      const servers = json.data || [];
-      
-      const streams = servers.map((s, idx) => ({
-        quality: s.name || `Server ${idx + 1}`,
-        url: `${origin}/api/stream/${eventId}.m3u8?server=${idx}`
-      }));
-      
-      return new Response(JSON.stringify({ streams }), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=36000" }
+      const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
+      const t = res.headers.get('T') || res.headers.get('t') || "";
+      const data = decryptYacine(await res.text(), t);
+      const response = new Response(data, {
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=60" }
       });
+      context.waitUntil(cache.put(cacheKey, response.clone()));
+      return response;
     } catch (err) {
-      return new Response(JSON.stringify({ streams: [] }), { status: 500, headers: { "Access-Control-Allow-Origin": "*" } });
+      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
     }
   }
 
-  // ====== 3. البث ======
+  // ====== البث - يجلب M3U8 ويعيده ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
-    const targetId = lastSegment.replace(".m3u8", "");
+    const eventId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
-    const m3u8CacheKey = `m3u8_${targetId}_${serverIndex}`;
-
+    const cacheKey = new Request(url.toString());
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+    
     try {
-      // جرب الكاش
-      try {
-        const cachedM3u8 = await env.YACINE_CACHE.get(m3u8CacheKey, 'text');
-        if (cachedM3u8) {
-          return new Response(cachedM3u8, {
-            status: 200,
-            headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=10" }
-          });
-        }
-      } catch (e) {}
-
-      // جلب بيانات الحدث - نفس المصدر
-      const eventData = await getCachedOrFetch(
-        `event_v1_${targetId}`, 
-        `https://def.yacinelive.com/api/event/${targetId}`, 
-        CACHE_DURATION.events
-      );
-      
-      // إصلاح الاستخراج - البيانات قد تكون متداخلة
-      let json;
-      try {
-        json = JSON.parse(eventData);
-      } catch (e) {
-        // إذا كان JSON داخل JSON
-        const temp = JSON.parse(eventData);
-        json = JSON.parse(temp.data);
-      }
-      
-      const servers = json.data || json || [];
+      // 1. جلب السيرفرات من event
+      const eventRes = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
+      const t = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
+      const eventData = decryptYacine(await eventRes.text(), t);
+      const json = JSON.parse(eventData);
+      const servers = json.data || [];
       const server = servers[serverIndex] || servers[0];
       
-      if (!server || !server.url) {
-        return new Response("No stream available", { status: 404 });
-      }
+      if (!server || !server.url) return new Response("No stream", { status: 404 });
       
+      // 2. استخراج معلومات البث
       const streamUrl = server.url.replace(/\\u0026/g, '&');
-      const userAgent = server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
-      const referer = server.referer || "";
+      const userAgent = server.user_agent || server.headers?.["User-Agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+      const referer = server.referer || server.headers?.["Referer"] || "";
       
+      // 3. جلب M3U8
       const headers = { "User-Agent": userAgent, "Accept": "*/*" };
       if (referer && referer !== '') headers["Referer"] = referer;
       
       const m3u8Res = await fetch(streamUrl, { headers });
       
-      if (!m3u8Res.ok) {
-        return new Response(`CDN Error: ${m3u8Res.status}`, { status: m3u8Res.status });
-      }
+      if (!m3u8Res.ok) return new Response(`Error: ${m3u8Res.status}`, { status: m3u8Res.status });
       
       const playlistText = await m3u8Res.text();
+      
+      // 4. إعادة كتابة المسارات
       const parsedUrl = new URL(streamUrl);
       const cdnOrigin = parsedUrl.origin;
       const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
@@ -149,17 +120,23 @@ export async function onRequest(context) {
       });
       
       const finalM3u8 = rewritten.join('\n');
-      try { await env.YACINE_CACHE.put(m3u8CacheKey, finalM3u8, { expirationTtl: CACHE_DURATION.m3u8_cache }); } catch (e) {}
       
-      return new Response(finalM3u8, {
+      const response = new Response(finalM3u8, {
         status: 200,
-        headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=10" }
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=10"
+        }
       });
+      
+      context.waitUntil(cache.put(cacheKey, response.clone()));
+      return response;
 
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
     }
   }
 
-  return new Response("Yacine Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("OK", { headers: { "Content-Type": "text/plain" } });
 }
