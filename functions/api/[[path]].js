@@ -3,7 +3,6 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const origin = url.origin;
 
-  // تنظيف المسار واستخراج الأجزاء
   let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
   if (path.startsWith('api/')) {
     path = path.slice(4);
@@ -62,13 +61,15 @@ export async function onRequest(context) {
     return "";
   }
 
-  // معالج البروكسي لإعادة كتابة M3U8 وتمرير قطع TS بـ Headers التطبيق الرسمي
+  // معالج البروكسي المحسّن للسرعة والاستقرار
   async function proxyStream(targetUrl) {
     try {
+      const isSegment = targetUrl.includes(".ts") || targetUrl.includes(".m4s") || targetUrl.includes(".aac");
+
       const res = await fetch(targetUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
-        cf: { cacheTtl: 0, cacheEverything: false }
+        cf: isSegment ? { cacheTtl: 86400, cacheEverything: true } : { cacheTtl: 0, cacheEverything: false }
       });
 
       if (!res.ok) {
@@ -116,28 +117,30 @@ export async function onRequest(context) {
           }
         });
       } else {
-        // تمرير قطع البث (.ts) المباشرة
-        return new Response(res.body, {
-          status: 200,
-          headers: {
-            "Content-Type": contentType || "video/mp2t",
-            "Access-Control-Allow-Origin": "*"
-          }
-        });
+        // تسريع تمرير قطع الفيديو (.ts) واستخدام Caching لمنع التقطيع
+        const headers = new Headers();
+        headers.set("Content-Type", contentType || "video/mp2t");
+        headers.set("Access-Control-Allow-Origin", "*");
+        headers.set("Cache-Control", "public, max-age=86400, immutable");
+        
+        const contentLength = res.headers.get("content-length");
+        if (contentLength) headers.set("Content-Length", contentLength);
+
+        return new Response(res.body, { status: 200, headers });
       }
     } catch (err) {
       return new Response(`Proxy Error: ${err.message}`, { status: 500 });
     }
   }
 
-  // 1. مسار البروكسي الخاص بالقطع: /api/proxy?url=...
+  // 1. مسار البروكسي للقطع
   if (path === "proxy") {
     const targetUrl = url.searchParams.get("url");
     if (!targetUrl) return new Response("Missing url param", { status: 400 });
     return await proxyStream(targetUrl);
   }
 
-  // 2. قائمة المباريات: /api/events
+  // 2. قائمة المباريات
   if (path === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -146,15 +149,11 @@ export async function onRequest(context) {
       });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       return new Response(decryptYacine(await res.text(), t), {
-        headers: { 
-          "Content-Type": "application/json; charset=UTF-8", 
-          "Access-Control-Allow-Origin": "*" 
-        }
+        headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
       });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message, data: [] }), { 
-        status: 500, 
-        headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } 
+        status: 500, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } 
       });
     }
   }
@@ -174,7 +173,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 4. تفاصيل أو تشغيل المباراة: /api/events/2863226942.m3u8 أو /api/events/2863226942
+  // 4. تفاصيل أو تشغيل المباراة
   if (pathSegments[0] === "events" && pathSegments.length > 1) {
     const rawId = pathSegments[1];
     const eventId = rawId.replace(".m3u8", "");
@@ -186,14 +185,12 @@ export async function onRequest(context) {
       
       const decryptedText = decryptYacine(await res.text(), t);
 
-      // إذا طلبت تشغيل M3U8 مباشر للمباراة
       if (rawId.endsWith(".m3u8")) {
         const streamUrl = extractUrlFromDecrypted(decryptedText);
         if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
         return await proxyStream(streamUrl);
       }
 
-      // إذا طلبت قائمة السيرفرات جاهزة مع روابط البروكسي الشغالة
       const parsedData = JSON.parse(decryptedText);
       const rawServers = parsedData.data?.servers || parsedData.servers || parsedData.data || [];
       const proxiedServers = Array.isArray(rawServers) ? rawServers.map((s, idx) => ({
