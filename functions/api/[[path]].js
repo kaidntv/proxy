@@ -29,40 +29,6 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  function extractUrlFromDecrypted(decryptedText) {
-    if (!decryptedText) return "";
-    let trimmed = decryptedText.trim();
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-    try {
-      const json = JSON.parse(trimmed);
-      const findUrl = (obj) => {
-        if (!obj) return "";
-        if (Array.isArray(obj)) {
-          for (const item of obj) { const found = findUrl(item); if (found) return found; }
-          return "";
-        }
-        if (typeof obj === 'object') {
-          const urlProps = ['url', 'file', 'link', 'stream_url', 'play_url', 'src'];
-          for (const prop of urlProps) {
-            if (obj[prop] && typeof obj[prop] === 'string' && (obj[prop].startsWith('http://') || obj[prop].startsWith('https://'))) return obj[prop];
-          }
-          for (const key in obj) {
-            if (obj[key] && typeof obj[key] === 'string' && (obj[key].startsWith('http://') || obj[key].startsWith('https://'))) return obj[key];
-          }
-          for (const key in obj) {
-            if (typeof obj[key] === 'object') { const found = findUrl(obj[key]); if (found) return found; }
-          }
-        }
-        return "";
-      };
-      const foundUrl = findUrl(json);
-      if (foundUrl) return foundUrl;
-    } catch (e) {}
-    const urlMatch = trimmed.match(/https?:\/\/[^\s"']+/);
-    if (urlMatch) return urlMatch[0];
-    return "";
-  }
-
   async function getCachedOrFetch(cacheKey, fetchUrl, duration) {
     const now = Date.now();
     try {
@@ -90,7 +56,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 2. تفاصيل مباراة - يرجع streams جاهزة ======
+  // ====== 2. تفاصيل مباراة - يرجع streams ======
   if (subPath.startsWith("events/")) {
     const eventId = subPath.split("/")[1];
     try {
@@ -111,89 +77,88 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث ======
+  // ====== 3. البث - يستخدم event data مباشرة ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
-    const targetId = lastSegment.replace(".m3u8", "");
+    const eventId = lastSegment.replace(".m3u8", "");
     const serverIndex = parseInt(url.searchParams.get("server") || "0", 10);
-    const sessionKey = `stream_url_${targetId}_${serverIndex}`;
-    const m3u8CacheKey = `m3u8_cache_${targetId}_${serverIndex}`;
+    const m3u8CacheKey = `m3u8_${eventId}_${serverIndex}`;
 
     try {
+      // جرب من الكاش
       try {
         const cachedM3u8 = await env.YACINE_CACHE.get(m3u8CacheKey, 'text');
         if (cachedM3u8) {
           return new Response(cachedM3u8, {
             status: 200,
-            headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30" }
+            headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=10" }
           });
         }
       } catch (e) {}
 
-      let finalCdnPlaylistUrl = "";
-      try {
-        const cached = await env.YACINE_CACHE.get(sessionKey, 'json');
-        if (cached && cached.url && (Date.now() - cached.time < CACHE_DURATION.stream_session)) finalCdnPlaylistUrl = cached.url;
-      } catch (e) {}
-
-      if (!finalCdnPlaylistUrl) {
-        const channelData = await getCachedOrFetch(`channel_url_${targetId}`, `https://def.yacinelive.com/api/channel/${targetId}`, CACHE_DURATION.stream_url);
-        let rawRedirectUrl = extractUrlFromDecrypted(channelData);
-        if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
-
-        const redirectRes = await fetch(rawRedirectUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": "https://x.com/" },
-          redirect: "follow"
-        });
-
-        if (!redirectRes.ok) {
-          try { await env.YACINE_CACHE.delete(sessionKey); } catch (e) {}
-          return new Response(`Redirect Error: ${redirectRes.status}`, { status: redirectRes.status });
-        }
-
-        finalCdnPlaylistUrl = redirectRes.url;
-        try {
-          await env.YACINE_CACHE.put(sessionKey, JSON.stringify({ url: finalCdnPlaylistUrl, time: Date.now() }), { expirationTtl: Math.floor(CACHE_DURATION.stream_session / 1000) });
-        } catch (e) {}
+      // جلب بيانات الحدث
+      const eventData = await getCachedOrFetch(
+        `event_v1_${eventId}`, 
+        `https://def.yacinelive.com/api/event/${eventId}`, 
+        CACHE_DURATION.events
+      );
+      
+      const json = JSON.parse(eventData);
+      const servers = json.data || [];
+      const server = servers[serverIndex] || servers[0];
+      
+      if (!server || !server.url) {
+        return new Response("No stream available", { status: 404 });
       }
-
-      const streamRes = await fetch(finalCdnPlaylistUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": "https://x.com/" }
-      });
-
-      if (!streamRes.ok) {
-        try { await env.YACINE_CACHE.delete(sessionKey); } catch (e) {}
-        return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
+      
+      const streamUrl = server.url.replace(/\\u0026/g, '&');
+      const userAgent = server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+      const referer = server.referer || "";
+      
+      // جلب M3U8 مع Headers
+      const headers = {
+        "User-Agent": userAgent,
+        "Accept": "*/*"
+      };
+      if (referer && referer !== '') headers["Referer"] = referer;
+      
+      const m3u8Res = await fetch(streamUrl, { headers });
+      
+      if (!m3u8Res.ok) {
+        return new Response(`CDN Error: ${m3u8Res.status}`, { status: m3u8Res.status });
       }
-
-      const playlistText = await streamRes.text();
-      const finalUrl = streamRes.url;
-      const parsedFinalUrl = new URL(finalUrl);
-      const cdnOrigin = parsedFinalUrl.origin;
-
-      const rewrittenLines = playlistText.split('\n').map(line => {
+      
+      const playlistText = await m3u8Res.text();
+      
+      // إعادة كتابة المسارات
+      const parsedUrl = new URL(streamUrl);
+      const cdnOrigin = parsedUrl.origin;
+      const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
+      
+      const rewritten = playlistText.split('\n').map(line => {
         let trimmed = line.trim();
-        if (!trimmed) return line;
-        if (trimmed.startsWith('#')) {
-          if (trimmed.includes('URI=')) {
-            return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
-              try { return `URI="${new URL(uriValue, cdnOrigin).href}"`; } catch (e) { return match; }
-            });
-          }
-          return line;
-        }
+        if (!trimmed || trimmed.startsWith('#')) return line;
         try {
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
           if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
-          return new URL(trimmed, finalUrl).href.split('?')[0];
-        } catch (e) { return trimmed; }
+          return `${cdnOrigin}${cdnPath}/${trimmed}`;
+        } catch (e) { return line; }
       });
-
-      const finalM3u8 = rewrittenLines.join('\n');
-      try { await env.YACINE_CACHE.put(m3u8CacheKey, finalM3u8, { expirationTtl: CACHE_DURATION.m3u8_cache }); } catch (e) {}
-
+      
+      const finalM3u8 = rewritten.join('\n');
+      
+      // خزن في الكاش
+      try { 
+        await env.YACINE_CACHE.put(m3u8CacheKey, finalM3u8, { expirationTtl: CACHE_DURATION.m3u8_cache }); 
+      } catch (e) {}
+      
       return new Response(finalM3u8, {
         status: 200,
-        headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30" }
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=10"
+        }
       });
 
     } catch (err) {
