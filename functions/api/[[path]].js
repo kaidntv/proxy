@@ -213,7 +213,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - Redirect بسيط مباشر ======
+  // ====== 3. البث - تحويل إلى re.new-redirect.online ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
@@ -226,8 +226,17 @@ export async function onRequest(context) {
       let rawRedirectUrl = extractUrlFromDecrypted(decryptedText);
       if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // إعادة توجيه مباشرة - المشاهد يتصل بالـ CDN مباشرة
-      return Response.redirect(rawRedirectUrl, 302);
+      // استخرج token و expiry من الرابط
+      const urlObj = new URL(rawRedirectUrl);
+      const pathParts = urlObj.pathname.split('/');
+      const liveId = pathParts[2];
+      const token = urlObj.searchParams.get('t');
+      const expiry = urlObj.searchParams.get('e');
+      
+      // أنشئ الرابط الصحيح
+      const correctUrl = `http://re.new-redirect.online/live/${liveId}/index.m3u8?t=${token}&e=${expiry}`;
+      
+      return Response.redirect(correctUrl, 302);
 
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { 
