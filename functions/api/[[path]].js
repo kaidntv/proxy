@@ -1,13 +1,5 @@
-const CACHE_DURATION = {
-  events: 60000,
-  m3u8: 10
-};
-
 const BASE_KEY = "c!xZj+N9&G@Ev@vw";
-const YACINE_HEADERS = { 
-  "Accept": "application/json", 
-  "User-Agent": "okhttp/4.12.0" 
-};
+const YACINE_HEADERS = { "Accept": "application/json", "User-Agent": "okhttp/4.12.0" };
 
 export async function onRequest(context) {
   const { request, params, env } = context;
@@ -48,7 +40,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== تفاصيل المباراة والسيرفرات ======
+  // ====== تفاصيل المباراة - يرجع روابط بروكسي ======
   if (subPath.startsWith("events/")) {
     const eventId = subPath.split("/")[1];
     const cacheKey = new Request(url.toString());
@@ -59,17 +51,26 @@ export async function onRequest(context) {
       const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const data = decryptYacine(await res.text(), t);
-      const response = new Response(data, {
+      const json = JSON.parse(data);
+      const servers = json.data || [];
+      
+      // كل الروابط عبر البروكسي
+      const streams = servers.map((s, idx) => ({
+        quality: s.name || `Server ${idx + 1}`,
+        url: `${origin}/api/stream/${eventId}.m3u8?server=${idx}`
+      }));
+      
+      const response = new Response(JSON.stringify({ streams }), {
         headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=60" }
       });
       context.waitUntil(cache.put(cacheKey, response.clone()));
       return response;
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+      return new Response(JSON.stringify({ streams: [] }), { status: 500 });
     }
   }
 
-  // ====== البث - يجلب M3U8 ويعيده ======
+  // ====== البث - بروكسي كامل ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const eventId = lastSegment.replace(".m3u8", "");
@@ -79,7 +80,7 @@ export async function onRequest(context) {
     if (cached) return cached;
     
     try {
-      // 1. جلب السيرفرات من event
+      // جلب السيرفرات
       const eventRes = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { headers: YACINE_HEADERS });
       const t = eventRes.headers.get('T') || eventRes.headers.get('t') || "";
       const eventData = decryptYacine(await eventRes.text(), t);
@@ -89,22 +90,21 @@ export async function onRequest(context) {
       
       if (!server || !server.url) return new Response("No stream", { status: 404 });
       
-      // 2. استخراج معلومات البث
       const streamUrl = server.url.replace(/\\u0026/g, '&');
-      const userAgent = server.user_agent || server.headers?.["User-Agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-      const referer = server.referer || server.headers?.["Referer"] || "";
+      const userAgent = server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+      const referer = server.referer || "";
       
-      // 3. جلب M3U8
       const headers = { "User-Agent": userAgent, "Accept": "*/*" };
       if (referer && referer !== '') headers["Referer"] = referer;
       
+      // جلب M3U8
       const m3u8Res = await fetch(streamUrl, { headers });
       
       if (!m3u8Res.ok) return new Response(`Error: ${m3u8Res.status}`, { status: m3u8Res.status });
       
       const playlistText = await m3u8Res.text();
       
-      // 4. إعادة كتابة المسارات
+      // إعادة كتابة جميع الروابط لتكون عبر البروكسي
       const parsedUrl = new URL(streamUrl);
       const cdnOrigin = parsedUrl.origin;
       const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
@@ -113,9 +113,19 @@ export async function onRequest(context) {
         let trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return line;
         try {
-          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-          if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
-          return `${cdnOrigin}${cdnPath}/${trimmed}`;
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            // لف الروابط الخارجية بالبروكسي
+            const encodedUrl = encodeURIComponent(trimmed);
+            return `${origin}/api/proxy?url=${encodedUrl}`;
+          }
+          if (trimmed.startsWith('/')) {
+            const fullUrl = cdnOrigin + trimmed;
+            const encodedUrl = encodeURIComponent(fullUrl);
+            return `${origin}/api/proxy?url=${encodedUrl}`;
+          }
+          const fullUrl = `${cdnOrigin}${cdnPath}/${trimmed}`;
+          const encodedUrl = encodeURIComponent(fullUrl);
+          return `${origin}/api/proxy?url=${encodedUrl}`;
         } catch (e) { return line; }
       });
       
@@ -133,6 +143,34 @@ export async function onRequest(context) {
       context.waitUntil(cache.put(cacheKey, response.clone()));
       return response;
 
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    }
+  }
+
+  // ====== بروكسي للمقاطع ======
+  if (subPath === "proxy") {
+    const targetUrl = url.searchParams.get('url');
+    if (!targetUrl) return new Response("No URL", { status: 400 });
+    
+    try {
+      const res = await fetch(targetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Accept": "*/*"
+        }
+      });
+      
+      const body = await res.arrayBuffer();
+      
+      return new Response(body, {
+        status: res.status,
+        headers: {
+          "Content-Type": res.headers.get('Content-Type') || 'application/octet-stream',
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600"
+        }
+      });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500 });
     }
