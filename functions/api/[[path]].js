@@ -61,67 +61,87 @@ export async function onRequest(context) {
     return "";
   }
 
-  // جلب ملف m3u8 فقط وتحويل مسارات القطع لروابط مباشرة بدون بروكسي
-  async function proxyM3u8Only(targetUrl) {
+  // بروكسي ذكي لمعالجة ملفات .js الموهة واستعادتها كقطع فيديو .ts
+  async function proxyStream(targetUrl) {
     try {
+      const isM3u8Request = targetUrl.includes(".m3u8");
+
       const res = await fetch(targetUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
-        cf: { cacheTtl: 0, cacheEverything: false }
+        cf: !isM3u8Request ? { cacheTtl: 300, cacheEverything: true } : { cacheTtl: 0, cacheEverything: false }
       });
 
       if (!res.ok) {
-        return new Response(`Error fetching M3U8: ${res.status}`, { status: res.status });
+        return new Response(`Error fetching source: ${res.status}`, { status: res.status });
       }
 
       const finalUrl = res.url;
-      const playlistText = await res.text();
+      const contentType = res.headers.get("content-type") || "";
 
-      // إعادة كتابة الروابط النسبية إلى روابط مباشرة صريحة دون تمرير القطع عبر البروكسي
-      const rewritten = playlistText.split('\n').map(line => {
-        let trimmed = line.trim();
-        if (!trimmed) return line;
+      // 1. إذا كان الملف هو قائمة البث (.m3u8)
+      if (isM3u8Request || contentType.includes("mpegurl") || contentType.includes("m3u8")) {
+        const playlistText = await res.text();
+        const rewritten = playlistText.split('\n').map(line => {
+          let trimmed = line.trim();
+          if (!trimmed) return line;
 
-        if (trimmed.startsWith('#')) {
-          if (trimmed.includes('URI=')) {
-            return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
-              try {
-                return `URI="${new URL(uriValue, finalUrl).href}"`;
-              } catch (e) {
-                return match;
-              }
-            });
+          if (trimmed.startsWith('#')) {
+            if (trimmed.includes('URI=')) {
+              return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
+                try {
+                  const abs = new URL(uriValue, finalUrl).href;
+                  return `URI="${origin}/api/proxy?url=${encodeURIComponent(abs)}"`;
+                } catch (e) {
+                  return match;
+                }
+              });
+            }
+            return line;
           }
-          return line;
-        }
 
-        try {
-          // رابط direct لقطع الـ TS بدون بروكسي
-          return new URL(trimmed, finalUrl).href;
-        } catch (e) {
-          return trimmed;
-        }
-      }).join('\n');
+          // توجيه كل السطور (بما فيها .js) عبر البروكسي
+          try {
+            const abs = new URL(trimmed, finalUrl).href;
+            return `${origin}/api/proxy?url=${encodeURIComponent(abs)}`;
+          } catch (e) {
+            return trimmed;
+          }
+        }).join('\n');
 
-      return new Response(rewritten, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "*",
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
-        }
-      });
+        return new Response(rewritten, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+          }
+        });
+      } else {
+        // 2. إذا كانت قطعة فيديو موهة بصيغة .js أو غيرها، نغير صيغتها إلى video/mp2t
+        const responseHeaders = new Headers();
+        responseHeaders.set("Content-Type", "video/mp2t"); 
+        responseHeaders.set("Access-Control-Allow-Origin", "*");
+        responseHeaders.set("Cache-Control", "public, max-age=3600");
+
+        const len = res.headers.get("content-length");
+        if (len) responseHeaders.set("Content-Length", len);
+
+        return new Response(res.body, {
+          status: 200,
+          headers: responseHeaders
+        });
+      }
     } catch (err) {
-      return new Response(`M3U8 Proxy Error: ${err.message}`, { status: 500 });
+      return new Response(`Proxy Error: ${err.message}`, { status: 500 });
     }
   }
 
-  // 1. بروكسي ملف الغلاف M3U8 فقط: /api/proxy?url=...
+  // 1. مسار البروكسي
   if (path === "proxy") {
     const targetUrl = url.searchParams.get("url");
     if (!targetUrl) return new Response("Missing url param", { status: 400 });
-    return await proxyM3u8Only(targetUrl);
+    return await proxyStream(targetUrl);
   }
 
   // 2. قائمة المباريات
@@ -142,7 +162,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. تشغيل القناة مباشرة: /api/channel/1424.m3u8
+  // 3. تشغيل القناة مباشرة
   if (pathSegments[0] === "channel" && pathSegments.length > 1) {
     const channelId = pathSegments[1].replace(".m3u8", "");
     try {
@@ -151,13 +171,13 @@ export async function onRequest(context) {
       const decrypted = decryptYacine(await res.text(), t);
       const streamUrl = extractUrlFromDecrypted(decrypted);
       if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-      return await proxyM3u8Only(streamUrl);
+      return await proxyStream(streamUrl);
     } catch (e) {
       return new Response(`Channel Error: ${e.message}`, { status: 500 });
     }
   }
 
-  // 4. تفاصيل أو تشغيل المباراة: /api/events/2863226942.m3u8 أو /api/events/2863226942
+  // 4. تفاصيل أو تشغيل المباراة
   if (pathSegments[0] === "events" && pathSegments.length > 1) {
     const rawId = pathSegments[1];
     const eventId = rawId.replace(".m3u8", "");
@@ -172,7 +192,7 @@ export async function onRequest(context) {
       if (rawId.endsWith(".m3u8")) {
         const streamUrl = extractUrlFromDecrypted(decryptedText);
         if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-        return await proxyM3u8Only(streamUrl);
+        return await proxyStream(streamUrl);
       }
 
       const parsedData = JSON.parse(decryptedText);
