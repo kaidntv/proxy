@@ -5,39 +5,253 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yacine Live - جدول المباريات</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
     <style>
-        :root { --bg: #0a0a0b; --card: #16161a; --text: #fff; --accent: #4ade80; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 20px; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .header h1 { font-size: 24px; color: var(--accent); }
-        .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; max-width: 900px; margin: 0 auto; }
-        .event-card { background: var(--card); border-radius: 14px; padding: 20px; text-align: center; border: 2px solid transparent; cursor: pointer; transition: all 0.2s; }
-        .event-card:hover, .event-card:focus { border-color: var(--accent); transform: scale(1.03); outline: none; }
-        .event-card img { width: 60px; height: 60px; object-fit: contain; margin-bottom: 10px; }
-        .event-name { font-size: 16px; font-weight: bold; margin: 10px 0; }
-        .event-time { color: #888; font-size: 14px; }
-        #playerContainer { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; }
-        #player { width: 100%; height: 100%; }
-        #closePlayer { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 12px 25px; border-radius: 8px; cursor: pointer; z-index: 3000; }
-        .quality-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 3000; }
-        .quality-btn { background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
-        .quality-btn.active { background: var(--accent); color: #000; font-weight: bold; }
-        #loading { text-align: center; color: #888; margin-top: 50px; font-size: 18px; }
+        :root {
+            --bg: #0d0d12;
+            --card: #1a1a24;
+            --card-hover: #222230;
+            --text: #ffffff;
+            --text-secondary: #a0a0b0;
+            --accent: #00d4aa;
+            --accent-dark: #00b894;
+            --border: #2a2a3a;
+            --radius: 16px;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Cairo', sans-serif;
+            min-height: 100vh;
+            background-image: radial-gradient(circle at 50% 0%, #1a1a2e 0%, #0d0d12 70%);
+        }
+        
+        .header {
+            text-align: center;
+            padding: 30px 20px;
+            background: linear-gradient(180deg, rgba(0,212,170,0.1) 0%, transparent 100%);
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .header .logo {
+            font-size: 32px;
+            font-weight: 900;
+            color: var(--accent);
+            letter-spacing: 1px;
+        }
+        
+        .header .subtitle {
+            color: var(--text-secondary);
+            margin-top: 5px;
+            font-size: 14px;
+        }
+        
+        .events-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            max-width: 1000px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        
+        .event-card {
+            background: var(--card);
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .event-card:hover, .event-card:focus {
+            border-color: var(--accent);
+            background: var(--card-hover);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,212,170,0.15);
+            outline: none;
+        }
+        
+        .event-card .league {
+            background: linear-gradient(135deg, var(--accent-dark), var(--accent));
+            color: #000;
+            padding: 8px;
+            text-align: center;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.5px;
+        }
+        
+        .event-card .teams {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 15px;
+            gap: 10px;
+        }
+        
+        .event-card .team {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .event-card .team img {
+            width: 50px;
+            height: 50px;
+            object-fit: contain;
+            margin-bottom: 8px;
+        }
+        
+        .event-card .team .team-name {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .event-card .vs {
+            font-size: 20px;
+            font-weight: 900;
+            color: var(--accent);
+        }
+        
+        .event-card .time {
+            text-align: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.03);
+            color: var(--text-secondary);
+            font-size: 13px;
+            border-top: 1px solid var(--border);
+        }
+        
+        .event-card .live-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: #ff4444;
+            color: #fff;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        #playerContainer {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: #000;
+            z-index: 2000;
+        }
+        
+        #player {
+            width: 100%;
+            height: 100%;
+        }
+        
+        #closePlayer {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            z-index: 3000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        #closePlayer:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .quality-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            z-index: 3000;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .quality-btn {
+            background: rgba(255,255,255,0.12);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 8px 18px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: 'Cairo', sans-serif;
+            transition: all 0.2s;
+        }
+        
+        .quality-btn.active {
+            background: var(--accent);
+            color: #000;
+            font-weight: 700;
+            border-color: var(--accent);
+        }
+        
+        #loading {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-top: 60px;
+            font-size: 18px;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
 
 <div class="header">
-    <h1>⚽ Yacine Live</h1>
-    <p style="color:#888;">جدول المباريات المباشرة</p>
+    <div class="logo">⚽ YACINE LIVE</div>
+    <div class="subtitle">جدول المباريات المباشرة</div>
 </div>
 
-<div id="loading">جاري تحميل المباريات...</div>
+<div id="loading">
+    <div class="spinner"></div>
+    جاري تحميل المباريات...
+</div>
+
 <div class="events-grid" id="container"></div>
 
 <div id="playerContainer">
-    <button id="closePlayer" onclick="closePlayer()">✕ إغلاق</button>
-    <video id="player" controls autoplay></video>
+    <button id="closePlayer" onclick="closePlayer()">✕</button>
+    <video id="player" controls autoplay playsinline></video>
     <div class="quality-bar" id="qualityBar"></div>
 </div>
 
@@ -53,7 +267,7 @@
             document.getElementById('loading').style.display = 'none';
             renderEvents(data.data || []);
         } catch (e) {
-            document.getElementById('loading').innerText = 'خطأ: ' + e.message;
+            document.getElementById('loading').innerHTML = 'خطأ: ' + e.message;
         }
     }
 
@@ -65,11 +279,31 @@
             const card = document.createElement('div');
             card.className = 'event-card';
             card.tabIndex = 0;
+            
+            const homeTeam = event.home_team || event.team1 || '';
+            const awayTeam = event.away_team || event.team2 || '';
+            const homeLogo = event.home_logo || event.logo1 || '';
+            const awayLogo = event.away_logo || event.logo2 || '';
+            const league = event.league || event.tournament || 'مباراة';
+            const time = event.time || event.date || '';
+            
             card.innerHTML = `
-                <img src="${event.logo || ''}" onerror="this.style.display='none'">
-                <div class="event-name">${event.name || event.title || 'مباراة'}</div>
-                <div class="event-time">${event.time || ''}</div>
+                ${event.live ? '<div class="live-badge">مباشر</div>' : ''}
+                <div class="league">${league}</div>
+                <div class="teams">
+                    <div class="team">
+                        ${homeLogo ? `<img src="${homeLogo}" onerror="this.style.display='none'">` : ''}
+                        <div class="team-name">${homeTeam}</div>
+                    </div>
+                    <div class="vs">VS</div>
+                    <div class="team">
+                        ${awayLogo ? `<img src="${awayLogo}" onerror="this.style.display='none'">` : ''}
+                        <div class="team-name">${awayTeam}</div>
+                    </div>
+                </div>
+                <div class="time">🕐 ${time}</div>
             `;
+            
             card.onclick = () => playEvent(event);
             card.onkeydown = (e) => { if (e.key === 'Enter') playEvent(event); };
             container.appendChild(card);
@@ -89,7 +323,7 @@
             currentServers = json.data?.servers || json.servers || json.data || [];
             currentQualityIndex = 0;
             
-            if (!currentServers.length) { alert('لا توجد سيرفرات'); return; }
+            if (!currentServers.length) { alert('لا توجد سيرفرات متاحة'); return; }
             
             document.getElementById('playerContainer').style.display = 'block';
             renderQualityButtons();
@@ -105,7 +339,7 @@
         currentServers.forEach((server, index) => {
             const btn = document.createElement('button');
             btn.className = 'quality-btn' + (index === currentQualityIndex ? ' active' : '');
-            btn.innerText = server.name || `Server ${index + 1}`;
+            btn.innerText = server.name || `جودة ${index + 1}`;
             btn.onclick = () => { currentQualityIndex = index; playServer(index); renderQualityButtons(); };
             bar.appendChild(btn);
         });
@@ -116,19 +350,12 @@
         if (!server || !server.url) return;
         
         const streamUrl = server.url.replace(/\\u0026/g, '&');
-        const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0";
-        const referer = server.headers?.["Referer"] || server.referer || "https://x.com/";
         
         const video = document.getElementById('player');
         if (hls) hls.destroy();
         
         if (Hls.isSupported()) {
-            hls = new Hls({
-                xhrSetup: function(xhr) {
-                    xhr.setRequestHeader('Referer', referer);
-                    xhr.setRequestHeader('User-Agent', userAgent);
-                }
-            });
+            hls = new Hls({ enableWorker: true, lowLatencyMode: true });
             hls.loadSource(streamUrl);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
@@ -142,8 +369,9 @@
     function closePlayer() {
         document.getElementById('playerContainer').style.display = 'none';
         if (hls) { hls.destroy(); hls = null; }
-        document.getElementById('player').pause();
-        document.getElementById('player').src = '';
+        const video = document.getElementById('player');
+        video.pause();
+        video.src = '';
     }
 
     document.addEventListener('keydown', (e) => {
@@ -151,10 +379,13 @@
             if (e.key === 'Escape' || e.keyCode === 8 || e.keyCode === 461) { closePlayer(); e.preventDefault(); }
             return;
         }
-        const cards = container.querySelectorAll('.event-card');
+        const cards = document.querySelectorAll('.event-card');
         if (!cards.length) return;
-        if (e.key === 'ArrowRight') { const next = [...cards].findIndex(c => c === document.activeElement) + 1; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
-        else if (e.key === 'ArrowLeft') { const prev = [...cards].findIndex(c => c === document.activeElement) - 1; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
+        const currentIndex = [...cards].findIndex(c => c === document.activeElement);
+        if (e.key === 'ArrowRight') { const next = currentIndex + 1; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft') { const prev = currentIndex - 1; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowDown') { const next = currentIndex + 3; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowUp') { const prev = currentIndex - 3; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
         else if (e.key === 'Enter') { document.activeElement.click(); e.preventDefault(); }
     });
 
