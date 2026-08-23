@@ -2,8 +2,8 @@ const CACHE_DURATION = {
   channels: 2592000000,
   categories: 2592000000,
   events: 36000000,
-  stream_url: 1800000,     // 30 دقيقة
-  redirect_cache: 1800      // 30 دقيقة Cache API
+  stream_url: 1800000,
+  redirect_cache: 1800
 };
 
 const SECRET_KEY = "Yacine2026@SecretKey!";
@@ -234,7 +234,6 @@ export async function onRequest(context) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     
-    // جرب من Cache API أولاً
     const redirectCacheKey = new Request(`https://redirect/${targetId}`);
     const cachedRedirect = await cache.match(redirectCacheKey);
     if (cachedRedirect) {
@@ -242,7 +241,6 @@ export async function onRequest(context) {
     }
     
     try {
-      // جلب الرابط من Yacine
       const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
@@ -250,7 +248,6 @@ export async function onRequest(context) {
       let rawRedirectUrl = extractUrlFromDecrypted(decryptedText);
       if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // اتبع الـ redirect للحصول على CDN النهائي
       const redirectRes = await fetch(rawRedirectUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -265,9 +262,16 @@ export async function onRequest(context) {
 
       const finalCdnUrl = redirectRes.url;
       
-      // خزن الـ Redirect في Cache API لمدة 30 دقيقة
-      const response = Response.redirect(finalCdnUrl, 302);
-      response.headers.set("Cache-Control", "public, max-age=1800");
+      // إنشاء Redirect بدون تعديل headers
+      const response = new Response(null, {
+        status: 302,
+        headers: {
+          "Location": finalCdnUrl,
+          "Cache-Control": "public, max-age=1800",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+      
       context.waitUntil(cache.put(redirectCacheKey, response.clone()));
       
       return response;
