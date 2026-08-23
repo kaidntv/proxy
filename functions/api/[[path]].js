@@ -1,6 +1,7 @@
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
+  const origin = url.origin;
 
   let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
   if (path.startsWith('api/')) {
@@ -60,21 +61,70 @@ export async function onRequest(context) {
     return "";
   }
 
-  // تتبع التوجيه للحصول على رابط CDN النهائي المباشر
-  async function getFinalDirectUrl(rawServerUrl) {
+  // جلب ملف m3u8 فقط وتحويل مسارات القطع لروابط مباشرة بدون بروكسي
+  async function proxyM3u8Only(targetUrl) {
     try {
-      const res = await fetch(rawServerUrl, {
+      const res = await fetch(targetUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
         cf: { cacheTtl: 0, cacheEverything: false }
       });
-      return res.url || rawServerUrl;
-    } catch (e) {
-      return rawServerUrl;
+
+      if (!res.ok) {
+        return new Response(`Error fetching M3U8: ${res.status}`, { status: res.status });
+      }
+
+      const finalUrl = res.url;
+      const playlistText = await res.text();
+
+      // إعادة كتابة الروابط النسبية إلى روابط مباشرة صريحة دون تمرير القطع عبر البروكسي
+      const rewritten = playlistText.split('\n').map(line => {
+        let trimmed = line.trim();
+        if (!trimmed) return line;
+
+        if (trimmed.startsWith('#')) {
+          if (trimmed.includes('URI=')) {
+            return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
+              try {
+                return `URI="${new URL(uriValue, finalUrl).href}"`;
+              } catch (e) {
+                return match;
+              }
+            });
+          }
+          return line;
+        }
+
+        try {
+          // رابط direct لقطع الـ TS بدون بروكسي
+          return new URL(trimmed, finalUrl).href;
+        } catch (e) {
+          return trimmed;
+        }
+      }).join('\n');
+
+      return new Response(rewritten, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "*",
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+        }
+      });
+    } catch (err) {
+      return new Response(`M3U8 Proxy Error: ${err.message}`, { status: 500 });
     }
   }
 
-  // 1. قائمة المباريات: /api/events
+  // 1. بروكسي ملف الغلاف M3U8 فقط: /api/proxy?url=...
+  if (path === "proxy") {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) return new Response("Missing url param", { status: 400 });
+    return await proxyM3u8Only(targetUrl);
+  }
+
+  // 2. قائمة المباريات
   if (path === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -92,24 +142,22 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. تشغيل القناة المباشر (توجيه 302 فوري لرابط CDN النهائي)
+  // 3. تشغيل القناة مباشرة: /api/channel/1424.m3u8
   if (pathSegments[0] === "channel" && pathSegments.length > 1) {
     const channelId = pathSegments[1].replace(".m3u8", "");
     try {
       const res = await fetch(`https://def.yacinelive.com/api/channel/${channelId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decrypted = decryptYacine(await res.text(), t);
-      const rawUrl = extractUrlFromDecrypted(decrypted);
-      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
-      
-      const finalUrl = await getFinalDirectUrl(rawUrl);
-      return Response.redirect(finalUrl, 302);
+      const streamUrl = extractUrlFromDecrypted(decrypted);
+      if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
+      return await proxyM3u8Only(streamUrl);
     } catch (e) {
       return new Response(`Channel Error: ${e.message}`, { status: 500 });
     }
   }
 
-  // 3. تفاصيل أو تشغيل المباراة مباشرة (توجيه 302 فوري)
+  // 4. تفاصيل أو تشغيل المباراة: /api/events/2863226942.m3u8 أو /api/events/2863226942
   if (pathSegments[0] === "events" && pathSegments.length > 1) {
     const rawId = pathSegments[1];
     const eventId = rawId.replace(".m3u8", "");
@@ -121,35 +169,20 @@ export async function onRequest(context) {
       
       const decryptedText = decryptYacine(await res.text(), t);
 
-      // طلب تشغيل مباشر عبر امتداد .m3u8
       if (rawId.endsWith(".m3u8")) {
-        const rawUrl = extractUrlFromDecrypted(decryptedText);
-        if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
-        
-        const finalUrl = await getFinalDirectUrl(rawUrl);
-        return Response.redirect(finalUrl, 302);
+        const streamUrl = extractUrlFromDecrypted(decryptedText);
+        if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
+        return await proxyM3u8Only(streamUrl);
       }
 
-      // طلب قائمة السيرفرات (يرجع روابط المباشرة مفكوكة ناتجة عن الـ Redirect)
       const parsedData = JSON.parse(decryptedText);
       const rawServers = parsedData.data?.servers || parsedData.servers || parsedData.data || [];
-      
-      const resolvedServers = [];
-      if (Array.isArray(rawServers)) {
-        for (let i = 0; i < rawServers.length; i++) {
-          const s = rawServers[i];
-          const serverUrl = s.url || s.file || s.link;
-          if (serverUrl) {
-            const directUrl = await getFinalDirectUrl(serverUrl);
-            resolvedServers.push({
-              name: s.name || s.quality || `Server ${i + 1}`,
-              url: directUrl
-            });
-          }
-        }
-      }
+      const proxiedServers = Array.isArray(rawServers) ? rawServers.map((s, idx) => ({
+        name: s.name || s.quality || `Server ${idx + 1}`,
+        url: `${origin}/api/proxy?url=${encodeURIComponent(s.url)}`
+      })) : [];
 
-      return new Response(JSON.stringify({ servers: resolvedServers }), {
+      return new Response(JSON.stringify({ servers: proxiedServers }), {
         headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
       });
     } catch (err) {
