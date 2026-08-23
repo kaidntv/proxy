@@ -2,7 +2,6 @@ export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
   
-  // تنظيف المسار واستخراج الأجزاء مع إزالة /api/ إن وجدت
   let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
   if (path.startsWith('api/')) {
     path = path.slice(4);
@@ -18,7 +17,6 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
 
-  // دالة فك التشفير
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
     const binaryString = atob(encryptedData);
@@ -35,7 +33,7 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات
+  // 1. قائمة المباريات
   if (path === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -57,7 +55,7 @@ export async function onRequest(context) {
     }
   }
 
-  // 2. جلب تفاصيل مباراة معينة
+  // 2. استخراج أول رابط مباشر للمباراة بدون بروكسي
   if (pathSegments[0] === "events" && pathSegments.length > 1) {
     const eventId = pathSegments[1];
     try {
@@ -66,14 +64,58 @@ export async function onRequest(context) {
         cf: { cacheTtl: 0, cacheEverything: false }
       });
       const t = res.headers.get('T') || res.headers.get('t') || "";
+      if (!t) {
+        return new Response(JSON.stringify({ error: "Invalid Event ID" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
+
       const decryptedText = decryptYacine(await res.text(), t);
-      
-      return new Response(decryptedText, {
+      const parsedData = JSON.parse(decryptedText);
+      const rawServers = parsedData.data?.servers || parsedData.servers || parsedData.data || [];
+
+      if (!Array.isArray(rawServers) || rawServers.length === 0) {
+        return new Response(JSON.stringify({ error: "No stream servers found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
+
+      // التقاط أول رابط سيرفر
+      const firstServerUrl = rawServers[0].url || rawServers[0].file || rawServers[0].link;
+
+      if (!firstServerUrl) {
+        return new Response(JSON.stringify({ error: "Stream URL missing" }), { status: 404 });
+      }
+
+      // تتبع إعادة التوجيه للحصول على الرابط النهائي المباشر (Direct CDN)
+      const redirectRes = await fetch(firstServerUrl, {
+        headers: {
+          "User-Agent": "okhttp/4.12.0",
+          "Referer": "http://re.ycn-redirect.com/"
+        },
+        redirect: "follow",
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+
+      const finalStreamUrl = redirectRes.url || firstServerUrl;
+
+      // تحويل تلقائي (302 Redirect) إلى الرابط المباشر إذا تم إضافة ?redirect=true
+      if (url.searchParams.get("redirect") === "true") {
+        return Response.redirect(finalStreamUrl, 302);
+      }
+
+      // إرجاع الرابط المباشر والنهائي داخل JSON
+      return new Response(JSON.stringify({ 
+        url: finalStreamUrl 
+      }), {
         headers: { 
           "Content-Type": "application/json; charset=UTF-8", 
           "Access-Control-Allow-Origin": "*" 
         }
       });
+
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { 
         status: 500, 
