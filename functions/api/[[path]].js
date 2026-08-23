@@ -1,7 +1,6 @@
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
-  const origin = url.origin;
 
   let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
   if (path.startsWith('api/')) {
@@ -61,86 +60,21 @@ export async function onRequest(context) {
     return "";
   }
 
-  // معالج البروكسي المحسّن للسرعة والاستقرار
-  async function proxyStream(targetUrl) {
+  // تتبع التوجيه للحصول على رابط CDN النهائي المباشر
+  async function getFinalDirectUrl(rawServerUrl) {
     try {
-      const isSegment = targetUrl.includes(".ts") || targetUrl.includes(".m4s") || targetUrl.includes(".aac");
-
-      const res = await fetch(targetUrl, {
+      const res = await fetch(rawServerUrl, {
         headers: STREAM_HEADERS,
         redirect: "follow",
-        cf: isSegment ? { cacheTtl: 86400, cacheEverything: true } : { cacheTtl: 0, cacheEverything: false }
+        cf: { cacheTtl: 0, cacheEverything: false }
       });
-
-      if (!res.ok) {
-        return new Response(`Error fetching source: ${res.status}`, { status: res.status });
-      }
-
-      const finalUrl = res.url;
-      const contentType = res.headers.get("content-type") || "";
-      const isM3u8 = contentType.includes("mpegurl") || contentType.includes("m3u8") || targetUrl.includes(".m3u8") || finalUrl.includes(".m3u8");
-
-      if (isM3u8) {
-        const playlistText = await res.text();
-        const rewritten = playlistText.split('\n').map(line => {
-          let trimmed = line.trim();
-          if (!trimmed) return line;
-
-          if (trimmed.startsWith('#')) {
-            if (trimmed.includes('URI=')) {
-              return trimmed.replace(/URI=["']([^"']+)["']/, (match, uriValue) => {
-                try {
-                  const abs = new URL(uriValue, finalUrl).href;
-                  return `URI="${origin}/api/proxy?url=${encodeURIComponent(abs)}"`;
-                } catch (e) {
-                  return match;
-                }
-              });
-            }
-            return line;
-          }
-
-          try {
-            const abs = new URL(trimmed, finalUrl).href;
-            return `${origin}/api/proxy?url=${encodeURIComponent(abs)}`;
-          } catch (e) {
-            return trimmed;
-          }
-        }).join('\n');
-
-        return new Response(rewritten, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
-          }
-        });
-      } else {
-        // تسريع تمرير قطع الفيديو (.ts) واستخدام Caching لمنع التقطيع
-        const headers = new Headers();
-        headers.set("Content-Type", contentType || "video/mp2t");
-        headers.set("Access-Control-Allow-Origin", "*");
-        headers.set("Cache-Control", "public, max-age=86400, immutable");
-        
-        const contentLength = res.headers.get("content-length");
-        if (contentLength) headers.set("Content-Length", contentLength);
-
-        return new Response(res.body, { status: 200, headers });
-      }
-    } catch (err) {
-      return new Response(`Proxy Error: ${err.message}`, { status: 500 });
+      return res.url || rawServerUrl;
+    } catch (e) {
+      return rawServerUrl;
     }
   }
 
-  // 1. مسار البروكسي للقطع
-  if (path === "proxy") {
-    const targetUrl = url.searchParams.get("url");
-    if (!targetUrl) return new Response("Missing url param", { status: 400 });
-    return await proxyStream(targetUrl);
-  }
-
-  // 2. قائمة المباريات
+  // 1. قائمة المباريات: /api/events
   if (path === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
@@ -158,22 +92,24 @@ export async function onRequest(context) {
     }
   }
 
-  // 3. تشغيل القناة مباشرة: /api/channel/1424.m3u8
+  // 2. تشغيل القناة المباشر (توجيه 302 فوري لرابط CDN النهائي)
   if (pathSegments[0] === "channel" && pathSegments.length > 1) {
     const channelId = pathSegments[1].replace(".m3u8", "");
     try {
       const res = await fetch(`https://def.yacinelive.com/api/channel/${channelId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decrypted = decryptYacine(await res.text(), t);
-      const streamUrl = extractUrlFromDecrypted(decrypted);
-      if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-      return await proxyStream(streamUrl);
+      const rawUrl = extractUrlFromDecrypted(decrypted);
+      if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
+      
+      const finalUrl = await getFinalDirectUrl(rawUrl);
+      return Response.redirect(finalUrl, 302);
     } catch (e) {
       return new Response(`Channel Error: ${e.message}`, { status: 500 });
     }
   }
 
-  // 4. تفاصيل أو تشغيل المباراة
+  // 3. تفاصيل أو تشغيل المباراة مباشرة (توجيه 302 فوري)
   if (pathSegments[0] === "events" && pathSegments.length > 1) {
     const rawId = pathSegments[1];
     const eventId = rawId.replace(".m3u8", "");
@@ -185,20 +121,35 @@ export async function onRequest(context) {
       
       const decryptedText = decryptYacine(await res.text(), t);
 
+      // طلب تشغيل مباشر عبر امتداد .m3u8
       if (rawId.endsWith(".m3u8")) {
-        const streamUrl = extractUrlFromDecrypted(decryptedText);
-        if (!streamUrl) return new Response("Stream URL not found", { status: 404 });
-        return await proxyStream(streamUrl);
+        const rawUrl = extractUrlFromDecrypted(decryptedText);
+        if (!rawUrl) return new Response("Stream URL not found", { status: 404 });
+        
+        const finalUrl = await getFinalDirectUrl(rawUrl);
+        return Response.redirect(finalUrl, 302);
       }
 
+      // طلب قائمة السيرفرات (يرجع روابط المباشرة مفكوكة ناتجة عن الـ Redirect)
       const parsedData = JSON.parse(decryptedText);
       const rawServers = parsedData.data?.servers || parsedData.servers || parsedData.data || [];
-      const proxiedServers = Array.isArray(rawServers) ? rawServers.map((s, idx) => ({
-        name: s.name || s.quality || `Server ${idx + 1}`,
-        url: `${origin}/api/proxy?url=${encodeURIComponent(s.url)}`
-      })) : [];
+      
+      const resolvedServers = [];
+      if (Array.isArray(rawServers)) {
+        for (let i = 0; i < rawServers.length; i++) {
+          const s = rawServers[i];
+          const serverUrl = s.url || s.file || s.link;
+          if (serverUrl) {
+            const directUrl = await getFinalDirectUrl(serverUrl);
+            resolvedServers.push({
+              name: s.name || s.quality || `Server ${i + 1}`,
+              url: directUrl
+            });
+          }
+        }
+      }
 
-      return new Response(JSON.stringify({ servers: proxiedServers }), {
+      return new Response(JSON.stringify({ servers: resolvedServers }), {
         headers: { "Content-Type": "application/json; charset=UTF-8", "Access-Control-Allow-Origin": "*" }
       });
     } catch (err) {
