@@ -19,7 +19,6 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // ====== المباريات (كاش 60 ثانية) ======
   if (subPath === "events") {
     const cacheKey = new Request(url.toString());
     const cached = await cache.match(cacheKey);
@@ -35,7 +34,6 @@ export async function onRequest(context) {
     return response;
   }
 
-  // ====== تفاصيل مباراة (كاش 60 ثانية) ======
   if (subPath.startsWith("events/")) {
     const eventId = subPath.split("/")[1];
     const cacheKey = new Request(url.toString());
@@ -52,7 +50,6 @@ export async function onRequest(context) {
     return response;
   }
 
-  // ====== البث - يجلب M3U8 مع Headers ويعيده ======
   if (subPath.startsWith("stream/")) {
     const targetId = subPath.split("/").pop().replace(".m3u8", "");
     const cacheKey = new Request(url.toString());
@@ -69,7 +66,7 @@ export async function onRequest(context) {
       if (!server || !server.url) return new Response("No stream", { status: 404 });
       
       const streamUrl = server.url.replace(/\\u0026/g, '&');
-      const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+      const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0";
       const referer = server.headers?.["Referer"] || server.referer || "https://x.com/";
       
       const m3u8Res = await fetch(streamUrl, {
@@ -96,19 +93,14 @@ export async function onRequest(context) {
       
       const response = new Response(rewritten.join('\n'), {
         status: 200,
-        headers: {
-          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=5"
-        }
+        headers: { "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=5" }
       });
       context.waitUntil(cache.put(cacheKey, response.clone()));
       return response;
-
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500 });
     }
   }
 
-  return new Response("Yacine Active!", { headers: { "Content-Type": "text/plain" } });
+  return new Response("OK", { headers: { "Content-Type": "text/plain" } });
 }
