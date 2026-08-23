@@ -1,9 +1,16 @@
 export async function onRequest(context) {
-  const { request, params } = context;
+  const { request } = context;
   const url = new URL(request.url);
-  const pathSegments = params.path || [];
-  const subPath = pathSegments.join('/');
-  const origin = url.origin;
+  
+  // تنظيف المسار واستخراج الأجزاء مع إزالة /api/ إن وجدت
+  let path = url.pathname.replace(/^\/+|\/+$/g, ''); 
+  if (path.startsWith('api/')) {
+    path = path.slice(4);
+  } else if (path === 'api') {
+    path = '';
+  }
+  
+  const pathSegments = path.split('/');
 
   const BASE_KEY = "c!xZj+N9&G@Ev@vw";
   const YACINE_HEADERS = { 
@@ -11,7 +18,7 @@ export async function onRequest(context) {
     "User-Agent": "okhttp/4.12.0" 
   };
 
-  // دالة فك التشفير الخاص بـ Yacine TV
+  // دالة فك التشفير
   function decryptYacine(encryptedData, headerT) {
     const fullKey = BASE_KEY + headerT;
     const binaryString = atob(encryptedData);
@@ -28,8 +35,8 @@ export async function onRequest(context) {
     return new TextDecoder().decode(decrypted);
   }
 
-  // 1. جلب قائمة المباريات والفعاليات (/events)
-  if (subPath === "events") {
+  // 1. جلب قائمة المباريات
+  if (path === "events") {
     try {
       const res = await fetch("https://def.yacinelive.com/api/events", { 
         headers: YACINE_HEADERS,
@@ -45,14 +52,14 @@ export async function onRequest(context) {
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message, data: [] }), { 
         status: 500, 
-        headers: { "Access-Control-Allow-Origin": "*" } 
+        headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } 
       });
     }
   }
 
-  // 2. جلب تفاصيل مباراة معينة وسيرفراتها (/events/{id})
-  if (subPath.startsWith("events/") && subPath !== "events") {
-    const eventId = subPath.split("/")[1];
+  // 2. جلب تفاصيل مباراة معينة
+  if (pathSegments[0] === "events" && pathSegments.length > 1) {
+    const eventId = pathSegments[1];
     try {
       const res = await fetch(`https://def.yacinelive.com/api/event/${eventId}`, { 
         headers: YACINE_HEADERS,
@@ -61,38 +68,22 @@ export async function onRequest(context) {
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
       
-      let streamsList = [{ quality: "Server 1", url: `${origin}/api/stream/${eventId}.m3u8` }];
-      try {
-        const json = JSON.parse(decryptedText);
-        const servers = json.data?.servers || json.servers || json.data;
-        if (Array.isArray(servers) && servers.length > 0) {
-          streamsList = servers.map((s, idx) => ({
-            quality: s.quality || `Server ${idx + 1}`,
-            url: s.url || s.file || s.link || `${origin}/api/stream/${eventId}.m3u8?server=${idx}`
-          }));
-        }
-      } catch (e) {}
-
-      return new Response(JSON.stringify({ streams: streamsList }), {
+      return new Response(decryptedText, {
         headers: { 
           "Content-Type": "application/json; charset=UTF-8", 
           "Access-Control-Allow-Origin": "*" 
         }
       });
     } catch (err) {
-      return new Response(JSON.stringify({ streams: [] }), { 
+      return new Response(JSON.stringify({ error: err.message }), { 
         status: 500, 
-        headers: { "Access-Control-Allow-Origin": "*" } 
+        headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } 
       });
     }
   }
 
-  // إرجاع خطأ 404 لأي مسار آخر (تم إيقاف باقي المسارات)
-  return new Response(JSON.stringify({ error: "Endpoint disabled or not found" }), { 
+  return new Response(JSON.stringify({ error: "Endpoint not found" }), { 
     status: 404, 
-    headers: { 
-      "Content-Type": "application/json", 
-      "Access-Control-Allow-Origin": "*" 
-    } 
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
   });
 }
