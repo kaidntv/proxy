@@ -28,12 +28,9 @@
 
         video.fill-mode { object-fit: cover; }
 
-        /* الأزرار العلوية - تظهر وتختفي */
         .top-bar {
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
+            top: 0; left: 0; right: 0;
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
@@ -42,182 +39,88 @@
             gap: 10px;
             flex-wrap: wrap;
             z-index: 20;
-            transition: opacity 0.3s ease, transform 0.3s ease;
+            transition: opacity 0.25s ease, transform 0.25s ease;
             opacity: 1;
             transform: translateY(0);
             pointer-events: none;
         }
 
-        .top-bar.hidden-top {
-            opacity: 0;
-            transform: translateY(-20px);
-        }
-
+        .top-bar.hidden-top { opacity: 0; transform: translateY(-15px); }
         .top-bar > * { pointer-events: auto; }
 
-        .quality-group {
-            display: flex;
-            gap: 8px;
-            direction: ltr;
-            flex-wrap: wrap;
-        }
-
+        .quality-group { display: flex; gap: 8px; direction: ltr; flex-wrap: wrap; }
         .quality-btn {
-            background: rgba(0,0,0,0.5);
-            color: #d1d5db;
+            background: rgba(0,0,0,0.5); color: #d1d5db;
             border: 1px solid rgba(255,255,255,0.2);
-            padding: 5px 14px;
-            border-radius: 16px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            padding: 5px 14px; border-radius: 16px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
             transition: all 0.2s;
         }
+        .quality-btn.active { border-color: #e53935; color: #fff; background: rgba(229,57,53,0.4); }
 
-        .quality-btn.active {
-            border-color: #e53935;
-            color: #fff;
-            background: rgba(229, 57, 53, 0.4);
-        }
-
-        .top-right {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .live-badge {
-            background: #e53935;
-            color: #fff;
-            padding: 3px 10px;
-            font-size: 10px;
-            font-weight: 700;
-            border-radius: 4px;
-        }
-
+        .top-right { display: flex; align-items: center; gap: 8px; }
+        .live-badge { background: #e53935; color: #fff; padding: 3px 10px; font-size: 10px; font-weight: 700; border-radius: 4px; }
         .icon-mini {
-            background: rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: #fff;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            font-size: 13px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+            color: #fff; width: 32px; height: 32px; border-radius: 50%;
+            font-size: 13px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
         }
 
-        /* أزرار الوسط - تظهر وتختفي */
         .center-controls {
             position: absolute;
-            top: 50%;
-            left: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 28px;
-            direction: ltr;
-            z-index: 20;
-            transition: opacity 0.3s ease;
+            display: flex; align-items: center; justify-content: center;
+            gap: 28px; direction: ltr; z-index: 20;
+            transition: opacity 0.25s ease;
             opacity: 1;
+            pointer-events: none;
         }
-
-        .center-controls.hidden-center {
-            opacity: 0;
-        }
+        .center-controls.hidden-center { opacity: 0; }
+        .center-controls > * { pointer-events: auto; }
 
         .exo-btn {
-            background: rgba(0, 0, 0, 0.4);
-            border: none;
-            color: #fff;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
+            background: rgba(0,0,0,0.4); border: none; color: #fff;
+            width: 44px; height: 44px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; backdrop-filter: blur(6px);
             transition: transform 0.1s;
         }
-
         .exo-btn:active { transform: scale(0.85); }
         .exo-btn svg { width: 22px; height: 22px; fill: #fff; }
         .exo-btn.play-pause { width: 58px; height: 58px; }
         .exo-btn.play-pause svg { width: 30px; height: 30px; }
 
-        /* الشريط السفلي - ظاهر دائماً */
         .bottom-bar {
             position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
+            bottom: 0; left: 0; right: 0;
             padding: 8px 16px;
             padding-bottom: max(12px, env(safe-area-inset-bottom));
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
+            display: flex; flex-direction: column; gap: 6px;
             background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, transparent 100%);
             z-index: 15;
         }
-
-        .bottom-actions {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 14px;
-            direction: ltr;
-        }
-
+        .bottom-actions { display: flex; justify-content: center; gap: 14px; direction: ltr; }
         .icon-btn {
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: #fff;
-            cursor: pointer;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: #fff; width: 36px; height: 36px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s;
         }
-
         .icon-btn:active { transform: scale(0.9); }
         .icon-btn svg { width: 18px; height: 18px; fill: #fff; }
 
-        .timeline-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: #fff;
-            font-size: 11px;
-            direction: ltr;
-        }
-
+        .timeline-row { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 11px; direction: ltr; }
         .progress-bar {
-            flex: 1;
-            -webkit-appearance: none;
-            appearance: none;
-            height: 3px;
-            background: rgba(255,255,255,0.3);
-            border-radius: 2px;
-            outline: none;
-            cursor: pointer;
+            flex: 1; -webkit-appearance: none; appearance: none;
+            height: 3px; background: rgba(255,255,255,0.3);
+            border-radius: 2px; outline: none; cursor: pointer;
         }
-
         .progress-bar::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #2196F3;
+            -webkit-appearance: none; width: 12px; height: 12px;
+            border-radius: 50%; background: #2196F3;
         }
     </style>
 </head>
@@ -226,33 +129,28 @@
 <div class="player-wrapper" id="playerWrapper">
     <video id="video" playsinline autoplay></video>
 
-    <!-- الشريط العلوي -->
     <div class="top-bar" id="topBar">
         <div class="quality-group" id="controls"></div>
         <div class="top-right">
             <span class="live-badge">LIVE</span>
-            <button class="icon-mini" id="fitBtn" onclick="toggleFitFill()">⛶</button>
+            <button class="icon-mini" id="fitBtn" onclick="toggleFitFill()">FIT</button>
             <button class="icon-mini" onclick="history.back()">✕</button>
         </div>
     </div>
 
-    <!-- أزرار الوسط -->
     <div class="center-controls" id="centerControls">
         <button class="exo-btn" onclick="seek(-10)">
             <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
         </button>
-
         <button class="exo-btn play-pause" onclick="togglePlay()">
             <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
         </button>
-
         <button class="exo-btn" onclick="seek(10)">
             <svg viewBox="0 0 24 24"><path d="M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62c-1.39-1.16-3.16-1.88-5.12-1.88-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z"/></svg>
         </button>
     </div>
 
-    <!-- الشريط السفلي - ظاهر دائماً -->
     <div class="bottom-bar">
         <div class="bottom-actions">
             <button class="icon-btn" onclick="togglePip()">
@@ -262,7 +160,6 @@
                 <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
             </button>
         </div>
-
         <div class="timeline-row">
             <span id="currentTime">00:00</span>
             <input type="range" class="progress-bar" id="seekBar" value="0" min="0" max="100" step="0.1">
@@ -280,10 +177,18 @@
     const seekBar = document.getElementById('seekBar');
     let hls = null, servers = [], current = 0, hideTimeout = null, isFill = false;
 
-    function enterFullscreen() {
-        if (playerWrapper.requestFullscreen) {
-            playerWrapper.requestFullscreen().catch(() => {});
-        }
+    // دخول تلقائي للوضع الأفقي ملئ الشاشة
+    async function enterLandscapeFullscreen() {
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                await screen.orientation.lock('landscape').catch(() => {});
+            }
+        } catch(e) {}
+        try {
+            if (playerWrapper.requestFullscreen) {
+                await playerWrapper.requestFullscreen().catch(() => {});
+            }
+        } catch(e) {}
     }
 
     async function load() {
@@ -294,7 +199,7 @@
             if (servers.length) {
                 renderButtons();
                 play(0);
-                setTimeout(enterFullscreen, 800);
+                setTimeout(enterLandscapeFullscreen, 600);
                 startHideTimer();
             }
         } catch(e) { console.error(e); }
@@ -315,7 +220,6 @@
     function play(index) {
         const url = `/api/stream/${eventId}.m3u8?server=${index}`;
         if (hls) hls.destroy();
-
         if (Hls.isSupported()) {
             hls = new Hls({ enableWorker: true, lowLatencyMode: true });
             hls.loadSource(url);
@@ -323,26 +227,23 @@
             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
             hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal && d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad(); });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
-            video.play();
+            video.src = url; video.play();
         }
     }
 
     function toggleFitFill() {
         isFill = !isFill;
         video.classList.toggle('fill-mode', isFill);
+        document.getElementById('fitBtn').innerText = isFill ? 'FILL' : 'FIT';
         document.getElementById('fitBtn').style.color = isFill ? '#2196F3' : '#fff';
     }
 
-    function togglePlay() {
-        video.paused ? video.play() : video.pause();
-    }
+    function togglePlay() { video.paused ? video.play() : video.pause(); }
 
     video.addEventListener('play', () => {
         document.getElementById('playIcon').style.display = 'none';
         document.getElementById('pauseIcon').style.display = 'block';
     });
-
     video.addEventListener('pause', () => {
         document.getElementById('playIcon').style.display = 'block';
         document.getElementById('pauseIcon').style.display = 'none';
@@ -364,15 +265,15 @@
 
     function formatTime(s) {
         const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-        return `${m < 10 ? '0' : ''}${m}:${sec < 10 ? '0' : ''}${sec}`;
+        return `${m<10?'0':''}${m}:${sec<10?'0':''}${sec}`;
     }
 
-    // ====== نظام الإظهار والإخفاء ======
+    // ====== تفاعل سلس ======
     function showControls() {
         topBar.classList.remove('hidden-top');
         centerControls.classList.remove('hidden-center');
         clearTimeout(hideTimeout);
-        hideTimeout = setTimeout(hideControls, 4000);
+        startHideTimer();
     }
 
     function hideControls() {
@@ -383,11 +284,8 @@
     }
 
     function toggleControls() {
-        if (topBar.classList.contains('hidden-top')) {
-            showControls();
-        } else {
-            hideControls();
-        }
+        if (topBar.classList.contains('hidden-top')) showControls();
+        else hideControls();
     }
 
     function startHideTimer() {
@@ -395,16 +293,18 @@
         hideTimeout = setTimeout(hideControls, 4000);
     }
 
-    // النقر يظهر/يخفي
+    // نقرة واحدة = تبديل، لمس = إظهار
+    let lastTap = 0;
     playerWrapper.addEventListener('click', (e) => {
-        if (e.target === video || e.target === playerWrapper) {
-            toggleControls();
-        }
+        const now = Date.now();
+        if (now - lastTap < 300) return;
+        lastTap = now;
+        if (e.target === video || e.target === playerWrapper) toggleControls();
     });
 
-    // اللمس يظهر
-    playerWrapper.addEventListener('touchstart', showControls, { passive: true });
-    playerWrapper.addEventListener('mousemove', showControls);
+    playerWrapper.addEventListener('touchstart', (e) => {
+        if (e.target === video || e.target === playerWrapper) showControls();
+    }, { passive: true });
 
     function toggleFullscreen() {
         if (!document.fullscreenElement) playerWrapper.requestFullscreen();
