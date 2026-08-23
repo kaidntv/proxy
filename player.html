@@ -7,15 +7,17 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #000; height: 100vh; overflow: hidden; }
+        body { background: #000; height: 100vh; overflow: hidden; font-family: 'Cairo', sans-serif; }
         video { width: 100%; height: 100%; }
         .controls { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 100; }
         .quality-btn { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; }
         .quality-btn.active { background: #5b8def; border-color: #5b8def; }
+        .back-btn { position: fixed; top: 15px; right: 15px; z-index: 100; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
     </style>
 </head>
 <body>
 
+<button class="back-btn" onclick="window.location.href='/'">Back</button>
 <video id="video" controls autoplay playsinline></video>
 <div class="controls" id="controls"></div>
 
@@ -23,6 +25,7 @@
     const eventId = new URLSearchParams(window.location.search).get('id');
     let hls = null;
     let servers = [];
+    let currentIndex = 0;
 
     async function load() {
         try {
@@ -30,12 +33,15 @@
             const json = await res.json();
             servers = json.data?.servers || json.servers || json.data || [];
             
-            if (!servers.length) return;
+            if (!servers.length) {
+                document.body.innerHTML = '<div style="color:#fff;text-align:center;padding:50px;">No streams available</div>';
+                return;
+            }
             
             renderButtons();
             play(0);
         } catch (e) {
-            console.error(e);
+            document.body.innerHTML = '<div style="color:#fff;text-align:center;padding:50px;">Error: ' + e.message + '</div>';
         }
     }
 
@@ -44,9 +50,9 @@
         el.innerHTML = '';
         servers.forEach((s, i) => {
             const btn = document.createElement('button');
-            btn.className = 'quality-btn' + (i === 0 ? ' active' : '');
-            btn.innerText = s.name || `Stream ${i+1}`;
-            btn.onclick = () => { play(i); renderButtons(); };
+            btn.className = 'quality-btn' + (i === currentIndex ? ' active' : '');
+            btn.innerText = s.name || 'Stream ' + (i + 1);
+            btn.onclick = () => { currentIndex = i; play(i); renderButtons(); };
             el.appendChild(btn);
         });
     }
@@ -55,18 +61,39 @@
         const server = servers[index];
         if (!server || !server.url) return;
         
-        const url = server.url.replace(/\\u0026/g, '&');
+        const streamUrl = server.url.replace(/\\u0026/g, '&');
+        const userAgent = server.user_agent || server.headers?.["User-Agent"] || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+        
         const video = document.getElementById('video');
         
         if (hls) hls.destroy();
         
         if (Hls.isSupported()) {
-            hls = new Hls({ enableWorker: true });
-            hls.loadSource(url);
+            hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                xhrSetup: function(xhr) {
+                    xhr.setRequestHeader('User-Agent', userAgent);
+                    // لا نرسل Referer إذا كان فارغاً
+                    if (server.referer && server.referer !== '') {
+                        xhr.setRequestHeader('Referer', server.referer);
+                    }
+                }
+            });
+            hls.loadSource(streamUrl);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+            hls.on(Hls.Events.ERROR, function(event, data) {
+                if (data.fatal) {
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                        hls.startLoad();
+                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                        hls.recoverMediaError();
+                    }
+                }
+            });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url;
+            video.src = streamUrl;
             video.play();
         }
     }
