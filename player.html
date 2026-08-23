@@ -1,250 +1,69 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Player</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg: #000000;
-            --surface: #0f0f12;
-            --surface-light: #1a1a20;
-            --text: #ffffff;
-            --text-secondary: #888890;
-            --accent: #5b8def;
-            --border: #222228;
-            --radius: 8px;
-        }
-        
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Cairo', sans-serif;
-            height: 100vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .top-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 16px;
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-        
-        .top-bar .title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-        
-        .back-btn {
-            background: var(--surface-light);
-            color: var(--text);
-            border: 1px solid var(--border);
-            padding: 6px 14px;
-            border-radius: var(--radius);
-            cursor: pointer;
-            font-family: 'Cairo', sans-serif;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-        
-        .back-btn:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-        
-        .video-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-            min-height: 0;
-        }
-        
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            background: #000;
-        }
-        
-        .bottom-bar {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            background: var(--surface);
-            border-top: 1px solid var(--border);
-            overflow-x: auto;
-            flex-shrink: 0;
-        }
-        
-        .quality-btn {
-            background: var(--surface-light);
-            color: var(--text-secondary);
-            border: 1px solid var(--border);
-            padding: 7px 16px;
-            border-radius: var(--radius);
-            cursor: pointer;
-            font-family: 'Cairo', sans-serif;
-            font-size: 12px;
-            white-space: nowrap;
-            transition: all 0.2s;
-        }
-        
-        .quality-btn:hover {
-            border-color: var(--accent);
-            color: var(--text);
-        }
-        
-        .quality-btn.active {
-            background: var(--accent);
-            color: #fff;
-            border-color: var(--accent);
-            font-weight: 600;
-        }
-        
-        .error-msg {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            color: var(--text-secondary);
-            font-size: 14px;
-            height: 100%;
-        }
-        
-        .error-msg .spinner {
-            width: 30px;
-            height: 30px;
-            border: 2px solid var(--border);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        
-        @keyframes spin { to { transform: rotate(360deg); } }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; height: 100vh; overflow: hidden; }
+        video { width: 100%; height: 100%; }
+        .controls { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 100; }
+        .quality-btn { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+        .quality-btn.active { background: #5b8def; border-color: #5b8def; }
+        .back-btn { position: fixed; top: 15px; right: 15px; z-index: 100; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 6px; cursor: pointer; }
     </style>
 </head>
 <body>
 
-<div class="top-bar">
-    <button class="back-btn" onclick="window.location.href='/'">Back</button>
-    <span class="title" id="streamTitle">Stream</span>
-</div>
-
-<div class="video-container">
-    <div class="error-msg" id="loadingState">
-        <div class="spinner"></div>
-        <span>Loading...</span>
-    </div>
-    <video id="video" controls autoplay playsinline></video>
-</div>
-
-<div class="bottom-bar" id="qualityBar"></div>
+<button class="back-btn" onclick="history.back()">Back</button>
+<video id="video" controls autoplay playsinline></video>
+<div class="controls" id="controls"></div>
 
 <script>
     const eventId = new URLSearchParams(window.location.search).get('id');
     let hls = null;
     let servers = [];
-    let currentIndex = 0;
+    let current = 0;
 
     async function load() {
-        try {
-            const res = await fetch(`/api/events/${eventId}`);
-            const json = await res.json();
-            servers = json.data || [];
-            
-            if (!servers.length) {
-                document.getElementById('loadingState').innerHTML = '<span>No streams available</span>';
-                return;
-            }
-            
-            document.getElementById('streamTitle').innerText = 
-                servers[0].name || 'Stream';
-            
-            renderButtons();
-            play(0);
-        } catch (e) {
-            document.getElementById('loadingState').innerHTML = '<span>Error: ' + e.message + '</span>';
-        }
+        const res = await fetch(`/api/events/${eventId}`);
+        const json = await res.json();
+        servers = json.data || [];
+        
+        if (!servers.length) return;
+        
+        renderButtons();
+        play(0);
     }
 
     function renderButtons() {
-        const bar = document.getElementById('qualityBar');
-        bar.innerHTML = '';
-        
-        servers.forEach((server, index) => {
+        const el = document.getElementById('controls');
+        el.innerHTML = '';
+        servers.forEach((s, i) => {
             const btn = document.createElement('button');
-            btn.className = 'quality-btn' + (index === currentIndex ? ' active' : '');
-            btn.innerText = server.name || 'Stream ' + (index + 1);
-            btn.onclick = () => {
-                currentIndex = index;
-                play(index);
-                renderButtons();
-            };
-            bar.appendChild(btn);
+            btn.className = 'quality-btn' + (i === current ? ' active' : '');
+            btn.innerText = s.name || 'S' + (i + 1);
+            btn.onclick = () => { current = i; play(i); renderButtons(); };
+            el.appendChild(btn);
         });
     }
 
     function play(index) {
-        const server = servers[index];
-        if (!server || !server.url) return;
-        
         const video = document.getElementById('video');
-        const loadingState = document.getElementById('loadingState');
-        
-        // استخدام /stream/ من Pages
-        const streamUrl = `/stream/${eventId}.m3u8?server=${index}`;
+        const url = `/api/stream/${eventId}.m3u8?server=${index}`;
         
         if (hls) hls.destroy();
         
         if (Hls.isSupported()) {
-            hls = new Hls({
-                enableWorker: true,
-                lowLatencyMode: true,
-                backBufferLength: 60
-            });
-            
-            hls.loadSource(streamUrl);
+            hls = new Hls({ enableWorker: true });
+            hls.loadSource(url);
             hls.attachMedia(video);
-            
-            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                loadingState.style.display = 'none';
-                video.style.display = 'block';
-                video.play().catch(() => {});
-            });
-            
-            hls.on(Hls.Events.ERROR, function(event, data) {
-                if (data.fatal) {
-                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                        hls.startLoad();
-                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        hls.recoverMediaError();
-                    } else {
-                        hls.destroy();
-                        loadingState.style.display = 'flex';
-                        loadingState.innerHTML = '<span>Stream error</span>';
-                    }
-                }
-            });
+            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = streamUrl;
-            loadingState.style.display = 'none';
-            video.style.display = 'block';
-            video.play().catch(() => {});
+            video.src = url;
+            video.play();
         }
     }
 
