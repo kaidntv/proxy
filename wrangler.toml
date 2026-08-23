@@ -1,0 +1,6 @@
+name = "proxy"
+compatibility_date = "2026-06-14"
+
+[[kv_namespaces]]
+binding = "YACINE_CACHE"
+id = "b4c1c142527141d3be38f1b10aca765c"
