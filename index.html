@@ -3,276 +3,324 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yacine Live - جدول المباريات</title>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <title>Yacine Live</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0d0d12;
-            --card: #1a1a24;
-            --card-hover: #222230;
-            --text: #ffffff;
-            --text-secondary: #a0a0b0;
-            --accent: #00d4aa;
-            --accent-dark: #00b894;
+            --bg-primary: #0f0f14;
+            --bg-secondary: #16161e;
+            --bg-card: #1a1a24;
+            --bg-hover: #222230;
+            --text-primary: #e8e8f0;
+            --text-secondary: #8888a0;
+            --text-muted: #555568;
+            --accent: #5b8def;
+            --accent-hover: #4a7de0;
+            --live-color: #e04444;
             --border: #2a2a3a;
-            --radius: 16px;
+            --radius: 12px;
+            --transition: 0.25s ease;
         }
         
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
         body {
-            background: var(--bg);
-            color: var(--text);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             font-family: 'Cairo', sans-serif;
             min-height: 100vh;
-            background-image: radial-gradient(circle at 50% 0%, #1a1a2e 0%, #0d0d12 70%);
+            line-height: 1.6;
         }
         
-        .header {
-            text-align: center;
-            padding: 30px 20px;
-            background: linear-gradient(180deg, rgba(0,212,170,0.1) 0%, transparent 100%);
+        .top-bar {
+            background: var(--bg-secondary);
             border-bottom: 1px solid var(--border);
+            padding: 18px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         
-        .header .logo {
-            font-size: 32px;
-            font-weight: 900;
+        .top-bar .brand {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
             color: var(--accent);
-            letter-spacing: 1px;
         }
         
-        .header .subtitle {
+        .top-bar .date {
+            font-size: 13px;
             color: var(--text-secondary);
-            margin-top: 5px;
-            font-size: 14px;
+        }
+        
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 16px;
         }
         
         .events-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            max-width: 1000px;
-            margin: 30px auto;
-            padding: 0 20px;
+            gap: 14px;
         }
         
         .event-card {
-            background: var(--card);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
             overflow: hidden;
-            border: 1px solid var(--border);
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all var(--transition);
             position: relative;
         }
         
         .event-card:hover, .event-card:focus {
             border-color: var(--accent);
-            background: var(--card-hover);
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(0,212,170,0.15);
+            background: var(--bg-hover);
+            transform: translateY(-2px);
             outline: none;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
         }
         
-        .event-card .league {
-            background: linear-gradient(135deg, var(--accent-dark), var(--accent));
-            color: #000;
-            padding: 8px;
-            text-align: center;
-            font-weight: 700;
-            font-size: 13px;
-            letter-spacing: 0.5px;
-        }
-        
-        .event-card .teams {
+        .card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px 15px;
-            gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255,255,255,0.02);
         }
         
-        .event-card .team {
+        .league-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--live-color);
+        }
+        
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--live-color);
+            border-radius: 50%;
+            animation: blink 1.2s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        
+        .teams-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 14px;
+            gap: 8px;
+        }
+        
+        .team {
             text-align: center;
             flex: 1;
+            min-width: 0;
         }
         
-        .event-card .team img {
-            width: 50px;
-            height: 50px;
+        .team-logo {
+            width: 44px;
+            height: 44px;
             object-fit: contain;
             margin-bottom: 8px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 50%;
+            padding: 6px;
         }
         
-        .event-card .team .team-name {
+        .team-name {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .match-center {
+            text-align: center;
+            flex: 0 0 50px;
+        }
+        
+        .match-center .vs {
             font-size: 13px;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+        
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 14px;
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        .card-footer .channel {
+            color: var(--accent);
             font-weight: 600;
         }
         
-        .event-card .vs {
-            font-size: 20px;
-            font-weight: 900;
-            color: var(--accent);
-        }
-        
-        .event-card .time {
-            text-align: center;
-            padding: 10px;
-            background: rgba(255,255,255,0.03);
-            color: var(--text-secondary);
-            font-size: 13px;
-            border-top: 1px solid var(--border);
-        }
-        
-        .event-card .live-badge {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: #ff4444;
-            color: #fff;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            animation: pulse 1.5s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        #playerContainer {
+        .modal-overlay {
             display: none;
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background: #000;
-            z-index: 2000;
-        }
-        
-        #player {
-            width: 100%;
-            height: 100%;
-        }
-        
-        #closePlayer {
-            position: absolute;
-            top: 15px;
-            right: 15px;
-            background: rgba(255,255,255,0.15);
-            color: #fff;
-            border: none;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 20px;
-            z-index: 3000;
-            display: flex;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
             align-items: center;
             justify-content: center;
-            transition: all 0.2s;
         }
         
-        #closePlayer:hover {
-            background: rgba(255,255,255,0.3);
+        .modal-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            width: 90%;
+            max-width: 360px;
+            text-align: center;
         }
         
-        .quality-bar {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 8px;
-            z-index: 3000;
-            flex-wrap: wrap;
-            justify-content: center;
+        .modal-box h3 {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
         }
         
-        .quality-btn {
-            background: rgba(255,255,255,0.12);
-            color: #fff;
-            border: 1px solid rgba(255,255,255,0.2);
-            padding: 8px 18px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 13px;
+        .modal-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-card);
+            color: var(--text-primary);
             font-family: 'Cairo', sans-serif;
-            transition: all 0.2s;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all var(--transition);
         }
         
-        .quality-btn.active {
-            background: var(--accent);
-            color: #000;
-            font-weight: 700;
+        .modal-btn:hover {
             border-color: var(--accent);
+            background: var(--bg-hover);
+        }
+        
+        .modal-btn.primary {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        
+        .modal-btn.primary:hover {
+            background: var(--accent-hover);
+        }
+        
+        .modal-cancel {
+            margin-top: 12px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: 'Cairo', sans-serif;
+            font-size: 13px;
         }
         
         #loading {
             text-align: center;
+            padding: 60px 0;
             color: var(--text-secondary);
-            margin-top: 60px;
-            font-size: 18px;
         }
         
         .spinner {
-            display: inline-block;
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--border);
+            width: 32px;
+            height: 32px;
+            border: 2px solid var(--border);
             border-top-color: var(--accent);
             border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 15px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 12px;
         }
         
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-<div class="header">
-    <div class="logo">⚽ YACINE LIVE</div>
-    <div class="subtitle">جدول المباريات المباشرة</div>
+<div class="top-bar">
+    <div class="brand">Yacine Live</div>
+    <div class="date" id="dateDisplay"></div>
 </div>
 
-<div id="loading">
-    <div class="spinner"></div>
-    جاري تحميل المباريات...
+<div class="container">
+    <div id="loading">
+        <div class="spinner"></div>
+        Loading...
+    </div>
+    <div class="events-grid" id="eventsContainer"></div>
 </div>
 
-<div class="events-grid" id="container"></div>
-
-<div id="playerContainer">
-    <button id="closePlayer" onclick="closePlayer()">✕</button>
-    <video id="player" controls autoplay playsinline></video>
-    <div class="quality-bar" id="qualityBar"></div>
+<div class="modal-overlay" id="modal">
+    <div class="modal-box">
+        <h3 id="modalTitle"></h3>
+        <button class="modal-btn primary" id="btnInternal">Watch Now</button>
+        <button class="modal-btn" id="btnExternal">Open External</button>
+        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+    </div>
 </div>
 
 <script>
-    let hls = null;
-    let currentServers = [];
-    let currentQualityIndex = 0;
+    let selectedEvent = null;
+
+    document.getElementById('dateDisplay').innerText = 
+        new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
     async function loadEvents() {
         try {
-            const res = await fetch("https://proxy-8gh.pages.dev/api/events");
+            const res = await fetch("/api/events");
             const data = await res.json();
             document.getElementById('loading').style.display = 'none';
             renderEvents(data.data || []);
         } catch (e) {
-            document.getElementById('loading').innerHTML = 'خطأ: ' + e.message;
+            document.getElementById('loading').innerHTML = '<p>Error: ' + e.message + '</p>';
         }
     }
 
+    function formatTime(ts) {
+        return new Date(ts * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function isLive(event) {
+        const now = Math.floor(Date.now() / 1000);
+        return now >= event.start_time && now <= event.end_time;
+    }
+
     function renderEvents(events) {
-        const container = document.getElementById('container');
+        const container = document.getElementById('eventsContainer');
         container.innerHTML = '';
         
         events.forEach(event => {
@@ -280,112 +328,86 @@
             card.className = 'event-card';
             card.tabIndex = 0;
             
-            const homeTeam = event.home_team || event.team1 || '';
-            const awayTeam = event.away_team || event.team2 || '';
-            const homeLogo = event.home_logo || event.logo1 || '';
-            const awayLogo = event.away_logo || event.logo2 || '';
-            const league = event.league || event.tournament || 'مباراة';
-            const time = event.time || event.date || '';
+            const live = isLive(event);
             
             card.innerHTML = `
-                ${event.live ? '<div class="live-badge">مباشر</div>' : ''}
-                <div class="league">${league}</div>
-                <div class="teams">
+                <div class="card-header">
+                    <span class="league-name">${event.champions || ''}</span>
+                    ${live ? '<span class="live-indicator"><span class="live-dot"></span>LIVE</span>' : ''}
+                </div>
+                <div class="teams-section">
                     <div class="team">
-                        ${homeLogo ? `<img src="${homeLogo}" onerror="this.style.display='none'">` : ''}
-                        <div class="team-name">${homeTeam}</div>
+                        <img class="team-logo" src="${event.team_1?.logo || ''}" onerror="this.style.visibility='hidden'">
+                        <div class="team-name">${event.team_1?.name || ''}</div>
                     </div>
-                    <div class="vs">VS</div>
+                    <div class="match-center">
+                        <span class="vs">VS</span>
+                    </div>
                     <div class="team">
-                        ${awayLogo ? `<img src="${awayLogo}" onerror="this.style.display='none'">` : ''}
-                        <div class="team-name">${awayTeam}</div>
+                        <img class="team-logo" src="${event.team_2?.logo || ''}" onerror="this.style.visibility='hidden'">
+                        <div class="team-name">${event.team_2?.name || ''}</div>
                     </div>
                 </div>
-                <div class="time">🕐 ${time}</div>
+                <div class="card-footer">
+                    <span class="channel">${event.channel || ''}</span>
+                    <span>${formatTime(event.start_time)}</span>
+                </div>
             `;
             
-            card.onclick = () => playEvent(event);
-            card.onkeydown = (e) => { if (e.key === 'Enter') playEvent(event); };
+            card.onclick = () => openModal(event);
+            card.onkeydown = (e) => { if (e.key === 'Enter') openModal(event); };
             container.appendChild(card);
         });
-        
-        if (events.length > 0) container.querySelector('.event-card').focus();
     }
 
-    async function playEvent(event) {
-        const eventId = event.id || event.event_id;
-        if (!eventId) return;
-        
+    function openModal(event) {
+        selectedEvent = event;
+        document.getElementById('modalTitle').innerText = 
+            `${event.team_1?.name || ''} vs ${event.team_2?.name || ''}`;
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    function closeModal() {
+        document.getElementById('modal').style.display = 'none';
+        selectedEvent = null;
+    }
+
+    document.getElementById('btnInternal').onclick = function() {
+        if (selectedEvent) {
+            window.location.href = `/player.html?id=${selectedEvent.id}`;
+        }
+        closeModal();
+    };
+
+    document.getElementById('btnExternal').onclick = async function() {
+        if (!selectedEvent) return;
         try {
-            const res = await fetch(`https://proxy-8gh.pages.dev/api/events/${eventId}`);
+            const res = await fetch(`/api/events/${selectedEvent.id}`);
             const json = await res.json();
-            
-            currentServers = json.data?.servers || json.servers || json.data || [];
-            currentQualityIndex = 0;
-            
-            if (!currentServers.length) { alert('لا توجد سيرفرات متاحة'); return; }
-            
-            document.getElementById('playerContainer').style.display = 'block';
-            renderQualityButtons();
-            playServer(0);
+            const servers = json.data?.servers || json.servers || json.data || [];
+            if (servers.length > 0) {
+                window.location.href = servers[0].url.replace(/\\u0026/g, '&');
+            }
         } catch (e) {
-            alert('خطأ: ' + e.message);
+            alert('Error: ' + e.message);
         }
-    }
-
-    function renderQualityButtons() {
-        const bar = document.getElementById('qualityBar');
-        bar.innerHTML = '';
-        currentServers.forEach((server, index) => {
-            const btn = document.createElement('button');
-            btn.className = 'quality-btn' + (index === currentQualityIndex ? ' active' : '');
-            btn.innerText = server.name || `جودة ${index + 1}`;
-            btn.onclick = () => { currentQualityIndex = index; playServer(index); renderQualityButtons(); };
-            bar.appendChild(btn);
-        });
-    }
-
-    function playServer(index) {
-        const server = currentServers[index];
-        if (!server || !server.url) return;
-        
-        const streamUrl = server.url.replace(/\\u0026/g, '&');
-        
-        const video = document.getElementById('player');
-        if (hls) hls.destroy();
-        
-        if (Hls.isSupported()) {
-            hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-            hls.loadSource(streamUrl);
-            hls.attachMedia(video);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
-            hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) hls.startLoad(); });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = streamUrl;
-            video.play();
-        }
-    }
-
-    function closePlayer() {
-        document.getElementById('playerContainer').style.display = 'none';
-        if (hls) { hls.destroy(); hls = null; }
-        const video = document.getElementById('player');
-        video.pause();
-        video.src = '';
-    }
+        closeModal();
+    };
 
     document.addEventListener('keydown', (e) => {
-        if (document.getElementById('playerContainer').style.display === 'block') {
-            if (e.key === 'Escape' || e.keyCode === 8 || e.keyCode === 461) { closePlayer(); e.preventDefault(); }
+        if (document.getElementById('modal').style.display === 'flex') {
+            if (e.key === 'Escape') { closeModal(); e.preventDefault(); }
             return;
         }
+        
         const cards = document.querySelectorAll('.event-card');
         if (!cards.length) return;
-        const currentIndex = [...cards].findIndex(c => c === document.activeElement);
-        if (e.key === 'ArrowRight') { const next = currentIndex + 1; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
-        else if (e.key === 'ArrowLeft') { const prev = currentIndex - 1; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
-        else if (e.key === 'ArrowDown') { const next = currentIndex + 3; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
-        else if (e.key === 'ArrowUp') { const prev = currentIndex - 3; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
+        const idx = [...cards].findIndex(c => c === document.activeElement);
+        
+        if (e.key === 'ArrowRight') { const n = idx + 1; if (n < cards.length) cards[n].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft') { const p = idx - 1; if (p >= 0) cards[p].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowDown') { const n = idx + 3; if (n < cards.length) cards[n].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowUp') { const p = idx - 3; if (p >= 0) cards[p].focus(); e.preventDefault(); }
         else if (e.key === 'Enter') { document.activeElement.click(); e.preventDefault(); }
     });
 
