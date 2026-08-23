@@ -1,17 +1,8 @@
-const CACHE_DURATION = {
-  channels: 2592000000,
-  categories: 2592000000,
-  events: 36000000,
-  stream_url: 1800000,
-  m3u8_cache: 60
-};
-
 const SECRET_KEY = "Yacine2026@SecretKey!";
 const ADMIN_PASSWORD = "Admin@2026";
-const GITHUB_STREAM = "https://raw.githubusercontent.com/alysjc7-dot/site/refs/heads/main/log/bMjeyq.m3u8";
 
 export async function onRequest(context) {
-  const { request, env, params } = context;
+  const { request, params } = context;
   const url = new URL(request.url);
   const cache = caches.default;
   
@@ -73,13 +64,6 @@ export async function onRequest(context) {
     `, { headers: { "Content-Type": "text/html; charset=UTF-8" } });
   }
   
-  // ====== حماية ======
-  const userAgent = (request.headers.get('User-Agent') || '').toLowerCase();
-  const blockedBots = ['bot', 'crawler', 'spider', 'scanner', 'curl', 'wget'];
-  if (blockedBots.some(bot => userAgent.includes(bot))) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
   const BASE_KEY = "c!xZj+N9&G@Ev@vw";
   const YACINE_HEADERS = { 
     "Accept": "application/json", 
@@ -229,17 +213,12 @@ export async function onRequest(context) {
     }
   }
 
-  // ====== 3. البث - Proxy مع كاش 60 ثانية ======
+  // ====== 3. البث - Redirect بسيط مباشر ======
   if (subPath.startsWith("stream/")) {
     const lastSegment = subPath.split("/").pop();
     const targetId = lastSegment.replace(".m3u8", "");
     
-    const m3u8CacheKey = new Request(url.toString());
-    const cachedM3u8 = await cache.match(m3u8CacheKey);
-    if (cachedM3u8) return cachedM3u8;
-    
     try {
-      // جلب من Yacine
       const res = await fetch(`https://def.yacinelive.com/api/channel/${targetId}`, { headers: YACINE_HEADERS });
       const t = res.headers.get('T') || res.headers.get('t') || "";
       const decryptedText = decryptYacine(await res.text(), t);
@@ -247,55 +226,8 @@ export async function onRequest(context) {
       let rawRedirectUrl = extractUrlFromDecrypted(decryptedText);
       if (!rawRedirectUrl) return new Response("Stream URL not found", { status: 404 });
 
-      // جلب M3U8 مع Headers الصحيحة
-      const streamRes = await fetch(rawRedirectUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
-          "Referer": "https://x.com/",
-          "Accept": "*/*"
-        },
-        redirect: "follow"
-      });
-
-      if (!streamRes.ok) {
-        return new Response(`CDN Error: ${streamRes.status}`, { status: streamRes.status });
-      }
-
-      const playlistText = await streamRes.text();
-      const finalCdnUrl = streamRes.url;
-      const parsedUrl = new URL(finalCdnUrl);
-      const cdnOrigin = parsedUrl.origin;
-      const cdnPath = parsedUrl.pathname.replace(/\/[^\/]+$/, '');
-
-      // إعادة كتابة المسارات
-      const rewrittenLines = playlistText.split('\n').map(line => {
-        let trimmed = line.trim();
-        if (!trimmed) return line;
-        if (trimmed.startsWith('#')) return line;
-        try {
-          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-          if (trimmed.startsWith('/')) return cdnOrigin + trimmed;
-          return `${cdnOrigin}${cdnPath}/${trimmed}`;
-        } catch (e) {
-          return trimmed;
-        }
-      });
-
-      const finalM3u8 = rewrittenLines.join('\n');
-      
-      const response = new Response(finalM3u8, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/vnd.apple.mpegurl; charset=UTF-8",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=60"
-        }
-      });
-      
-      // خزن في Cache API لمدة 60 ثانية
-      context.waitUntil(cache.put(m3u8CacheKey, response.clone()));
-      
-      return response;
+      // إعادة توجيه مباشرة - المشاهد يتصل بالـ CDN مباشرة
+      return Response.redirect(rawRedirectUrl, 302);
 
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), { 
