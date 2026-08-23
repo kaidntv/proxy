@@ -3,366 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>beIN Smart List</title>
+    <title>Yacine Live - جدول المباريات</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        :root {
-            --bg: #0a0a0b;
-            --card: #16161a;
-            --text: #ffffff;
-        }
-
-        body {
-            background-color: var(--bg);
-            color: var(--text);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0; 
-            padding: 20px;
-        }
-
-        .channel-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .channel-item {
-            background: var(--card);
-            border-radius: 14px;
-            padding: 15px 10px;
-            text-align: center;
-            border: 2px solid transparent;
-            cursor: pointer;
-            transition: transform 0.2s, border-color 0.2s;
-        }
-
-        .channel-item img {
-            width: 65px; 
-            height: 65px;
-            object-fit: contain; 
-            margin-bottom: 10px;
-        }
-
-        .channel-name { 
-            font-size: 13px; 
-            font-weight: bold; 
-            display: block; 
-            color: #ddd;
-        }
-
-        .channel-item:focus, .channel-item.selected {
-            border-color: #ffffff;
-            background: #22222a;
-            outline: none;
-            transform: scale(1.05);
-        }
-
-        .modal {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            display: none;
-            align-items: center; justify-content: center;
-            z-index: 1000;
-        }
-
-        .modal-content {
-            background: #151518;
-            width: 90%;
-            max-width: 500px;
-            border-radius: 20px;
-            padding: 20px;
-            text-align: center;
-        }
-
-        .quality-btn {
-            background: #1c1c21;
-            color: white;
-            border: 2px solid transparent;
-            padding: 12px;
-            width: 100%;
-            margin: 8px 0;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .quality-btn:focus, .quality-btn.selected {
-            background: #2a2a32; 
-            border-color: #ffffff; 
-            outline: none;
-        }
-
-        .close-btn {
-            margin-top: 15px;
-            color: #ccc;
-            background: #151518;
-            border: 1px solid rgba(255,255,255,0.2);
-            font-size: 14px;
-            cursor: pointer;
-            padding: 11px;
-            width: 100%;
-            border-radius: 12px;
-        }
-
-        #loading {
-            text-align: center;
-            color: #888;
-            margin-top: 50px;
-        }
-
-        #playerContainer {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: #000;
-            z-index: 2000;
-        }
-
-        #player {
-            width: 100%;
-            height: 100%;
-        }
-
-        #closePlayer {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(255,255,255,0.2);
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            z-index: 3000;
-        }
+        :root { --bg: #0a0a0b; --card: #16161a; --text: #fff; --accent: #4ade80; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 24px; color: var(--accent); }
+        .events-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; max-width: 900px; margin: 0 auto; }
+        .event-card { background: var(--card); border-radius: 14px; padding: 20px; text-align: center; border: 2px solid transparent; cursor: pointer; transition: all 0.2s; }
+        .event-card:hover, .event-card:focus { border-color: var(--accent); transform: scale(1.03); outline: none; }
+        .event-card img { width: 60px; height: 60px; object-fit: contain; margin-bottom: 10px; }
+        .event-name { font-size: 16px; font-weight: bold; margin: 10px 0; }
+        .event-time { color: #888; font-size: 14px; }
+        #playerContainer { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; }
+        #player { width: 100%; height: 100%; }
+        #closePlayer { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 12px 25px; border-radius: 8px; cursor: pointer; z-index: 3000; }
+        .quality-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 3000; }
+        .quality-btn { background: rgba(255,255,255,0.2); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
+        .quality-btn.active { background: var(--accent); color: #000; font-weight: bold; }
+        #loading { text-align: center; color: #888; margin-top: 50px; font-size: 18px; }
     </style>
 </head>
 <body>
 
-<div id="loading">جاري تحميل القنوات...</div>
-<div class="channel-grid" id="container"></div>
-
-<div class="modal" id="qualityModal">
-    <div class="modal-content">
-        <h3 id="modalTitle" style="margin-top:0; color:#fff;">اختر الجودة</h3>
-        <div id="qualitiesList"></div>
-        <button class="close-btn" onclick="closeModal()">إغلاق</button>
-    </div>
+<div class="header">
+    <h1>⚽ Yacine Live</h1>
+    <p style="color:#888;">جدول المباريات المباشرة</p>
 </div>
+
+<div id="loading">جاري تحميل المباريات...</div>
+<div class="events-grid" id="container"></div>
 
 <div id="playerContainer">
     <button id="closePlayer" onclick="closePlayer()">✕ إغلاق</button>
     <video id="player" controls autoplay></video>
+    <div class="quality-bar" id="qualityBar"></div>
 </div>
 
 <script>
-    const API_KEY = "Yacine2026@SecretKey!";
-    
-    const container = document.getElementById('container');
-    const modal = document.getElementById('qualityModal');
-    const qualitiesList = document.getElementById('qualitiesList');
-    const modalTitle = document.getElementById('modalTitle');
-    const loading = document.getElementById('loading');
-    const playerContainer = document.getElementById('playerContainer');
-    const video = document.getElementById('player');
-    
-    let channelsMap = {};
-    let currentFocusIndex = 0;
-    let isModalOpen = false;
-    let modalFocusIndex = 0;
     let hls = null;
+    let currentServers = [];
+    let currentQualityIndex = 0;
 
-    async function loadChannels() {
+    async function loadEvents() {
         try {
-            const res = await fetch(`https://proxy-8gh.pages.dev/api/all-channels?t=${API_KEY}`);
+            const res = await fetch("https://proxy-8gh.pages.dev/api/events");
             const data = await res.json();
-            
-            loading.style.display = 'none';
-            
-            const channelsList = data.data || [];
-            channelsList.forEach(ch => {
-                channelsMap[ch.name] = ch;
-            });
-
-            renderGrid();
+            document.getElementById('loading').style.display = 'none';
+            renderEvents(data.data || []);
         } catch (e) {
-            loading.innerText = 'حدث خطأ أثناء تحميل القنوات';
+            document.getElementById('loading').innerText = 'خطأ: ' + e.message;
         }
     }
 
-    function renderGrid() {
+    function renderEvents(events) {
+        const container = document.getElementById('container');
         container.innerHTML = '';
-        const channelsArray = Object.values(channelsMap);
-
-        channelsArray.forEach((ch) => {
-            const item = document.createElement('div');
-            item.className = 'channel-item';
-            item.tabIndex = 0;
-            item.innerHTML = `
-                <img src="${ch.logo}" alt="${ch.name}">
-                <span class="channel-name">${ch.name}</span>
+        
+        events.forEach(event => {
+            const card = document.createElement('div');
+            card.className = 'event-card';
+            card.tabIndex = 0;
+            card.innerHTML = `
+                <img src="${event.logo || ''}" onerror="this.style.display='none'">
+                <div class="event-name">${event.name || event.title || 'مباراة'}</div>
+                <div class="event-time">${event.time || ''}</div>
             `;
-            item.onclick = () => openModal(ch);
-            container.appendChild(item);
+            card.onclick = () => playEvent(event);
+            card.onkeydown = (e) => { if (e.key === 'Enter') playEvent(event); };
+            container.appendChild(card);
         });
-
-        const items = container.querySelectorAll('.channel-item');
-        if (items.length > 0) {
-            items[0].focus();
-            currentFocusIndex = 0;
-        }
+        
+        if (events.length > 0) container.querySelector('.event-card').focus();
     }
 
-    function openModal(ch) {
-        isModalOpen = true;
-        modalTitle.innerText = ch.name;
-        qualitiesList.innerHTML = '';
-
-        const availableQualities = ['1080p', '720p', '360p', '244p'];
-        availableQualities.forEach(q => {
-            if (ch.qualities && ch.qualities[q]) {
-                const btn = document.createElement('button');
-                btn.className = 'quality-btn';
-                btn.tabIndex = 0;
-                btn.innerHTML = `<span>${q}</span>`;
-                btn.onclick = () => {
-                    closeModal();
-                    playStream(ch.qualities[q]);
-                };
-                qualitiesList.appendChild(btn);
-            }
-        });
-
-        modal.style.display = 'flex';
-        modalFocusIndex = 0;
-        updateModalFocus();
-    }
-
-    function closeModal() {
-        isModalOpen = false;
-        modal.style.display = 'none';
-    }
-
-    async function playStream(url) {
-        const streamWithKey = url.includes('?') ? `${url}&t=${API_KEY}` : `${url}?t=${API_KEY}`;
+    async function playEvent(event) {
+        const eventId = event.id || event.event_id;
+        if (!eventId) return;
         
         try {
-            // جلب الرابط + Headers من الـ Worker
-            const res = await fetch(streamWithKey);
-            const data = await res.json();
+            const res = await fetch(`https://proxy-8gh.pages.dev/api/events/${eventId}`);
+            const json = await res.json();
             
-            playerContainer.style.display = 'block';
+            currentServers = json.data?.servers || json.servers || json.data || [];
+            currentQualityIndex = 0;
             
-            // استخدام hls.js مع Headers
-            if (hls) {
-                hls.destroy();
-            }
+            if (!currentServers.length) { alert('لا توجد سيرفرات'); return; }
             
-            if (Hls.isSupported()) {
-                hls = new Hls({
-                    xhrSetup: function(xhr, url) {
-                        xhr.setRequestHeader('Referer', data.referer);
-                        xhr.setRequestHeader('User-Agent', data.userAgent);
-                    }
-                });
-                
-                hls.loadSource(data.url);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    video.play();
-                });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = data.url;
-                video.play();
-            }
-            
+            document.getElementById('playerContainer').style.display = 'block';
+            renderQualityButtons();
+            playServer(0);
         } catch (e) {
-            alert('حدث خطأ أثناء تشغيل البث');
+            alert('خطأ: ' + e.message);
+        }
+    }
+
+    function renderQualityButtons() {
+        const bar = document.getElementById('qualityBar');
+        bar.innerHTML = '';
+        currentServers.forEach((server, index) => {
+            const btn = document.createElement('button');
+            btn.className = 'quality-btn' + (index === currentQualityIndex ? ' active' : '');
+            btn.innerText = server.name || `Server ${index + 1}`;
+            btn.onclick = () => { currentQualityIndex = index; playServer(index); renderQualityButtons(); };
+            bar.appendChild(btn);
+        });
+    }
+
+    function playServer(index) {
+        const server = currentServers[index];
+        if (!server || !server.url) return;
+        
+        const streamUrl = server.url.replace(/\\u0026/g, '&');
+        const userAgent = server.headers?.["User-Agent"] || server.user_agent || "Mozilla/5.0";
+        const referer = server.headers?.["Referer"] || server.referer || "https://x.com/";
+        
+        const video = document.getElementById('player');
+        if (hls) hls.destroy();
+        
+        if (Hls.isSupported()) {
+            hls = new Hls({
+                xhrSetup: function(xhr) {
+                    xhr.setRequestHeader('Referer', referer);
+                    xhr.setRequestHeader('User-Agent', userAgent);
+                }
+            });
+            hls.loadSource(streamUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+            hls.on(Hls.Events.ERROR, (e, d) => { if (d.fatal) hls.startLoad(); });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = streamUrl;
+            video.play();
         }
     }
 
     function closePlayer() {
-        playerContainer.style.display = 'none';
-        if (hls) {
-            hls.destroy();
-            hls = null;
-        }
-        video.pause();
-        video.src = '';
+        document.getElementById('playerContainer').style.display = 'none';
+        if (hls) { hls.destroy(); hls = null; }
+        document.getElementById('player').pause();
+        document.getElementById('player').src = '';
     }
 
-    function updateModalFocus() {
-        const modalButtons = modal.querySelectorAll('.quality-btn, .close-btn');
-        if (modalButtons[modalFocusIndex]) {
-            modalButtons[modalFocusIndex].focus();
-        }
-    }
-
-    window.addEventListener('keydown', (e) => {
-        if (playerContainer.style.display === 'block') {
-            if (e.key === 'Escape' || e.keyCode === 8 || e.keyCode === 461) {
-                closePlayer();
-                e.preventDefault();
-            }
+    document.addEventListener('keydown', (e) => {
+        if (document.getElementById('playerContainer').style.display === 'block') {
+            if (e.key === 'Escape' || e.keyCode === 8 || e.keyCode === 461) { closePlayer(); e.preventDefault(); }
             return;
         }
-        
-        const items = container.querySelectorAll('.channel-item');
-        const columns = 3;
-
-        if (!isModalOpen) {
-            if (items.length === 0) return;
-
-            if (e.key === 'ArrowRight') {
-                currentFocusIndex = (currentFocusIndex - 1 + items.length) % items.length;
-                items[currentFocusIndex].focus();
-                e.preventDefault();
-            } else if (e.key === 'ArrowLeft') {
-                currentFocusIndex = (currentFocusIndex + 1) % items.length;
-                items[currentFocusIndex].focus();
-                e.preventDefault();
-            } else if (e.key === 'ArrowDown') {
-                currentFocusIndex += columns;
-                if (currentFocusIndex >= items.length) currentFocusIndex = items.length - 1;
-                items[currentFocusIndex].focus();
-                e.preventDefault();
-            } else if (e.key === 'ArrowUp') {
-                currentFocusIndex -= columns;
-                if (currentFocusIndex < 0) currentFocusIndex = 0;
-                items[currentFocusIndex].focus();
-                e.preventDefault();
-            } else if (e.key === 'Enter') {
-                items[currentFocusIndex].click();
-                e.preventDefault();
-            }
-        } else {
-            const modalButtons = Array.from(modal.querySelectorAll('.quality-btn, .close-btn'));
-            if (modalButtons.length === 0) return;
-
-            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-                modalFocusIndex = (modalFocusIndex + 1) % modalButtons.length;
-                updateModalFocus();
-                e.preventDefault();
-            } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-                modalFocusIndex = (modalFocusIndex - 1 + modalButtons.length) % modalButtons.length;
-                updateModalFocus();
-                e.preventDefault();
-            } else if (e.key === 'Enter') {
-                modalButtons[modalFocusIndex].click();
-                e.preventDefault();
-            } else if (e.key === 'Escape' || e.keyCode === 8 || e.keyCode === 461) {
-                closeModal();
-                e.preventDefault();
-            }
-        }
+        const cards = container.querySelectorAll('.event-card');
+        if (!cards.length) return;
+        if (e.key === 'ArrowRight') { const next = [...cards].findIndex(c => c === document.activeElement) + 1; if (next < cards.length) cards[next].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft') { const prev = [...cards].findIndex(c => c === document.activeElement) - 1; if (prev >= 0) cards[prev].focus(); e.preventDefault(); }
+        else if (e.key === 'Enter') { document.activeElement.click(); e.preventDefault(); }
     });
 
-    loadChannels();
+    loadEvents();
 </script>
 
 </body>
